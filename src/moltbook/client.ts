@@ -256,7 +256,9 @@ export class MoltbookClient {
     let operation = 'sum'; // default
 
     if (cleaned.includes('product') || cleaned.includes('multiply') ||
-        cleaned.includes('times') || cleaned.includes('multiplied')) {
+        cleaned.includes('times') || cleaned.includes('multiplied') ||
+        cleaned.includes('torque') || cleaned.includes('work') || cleaned.includes('power') ||
+        cleaned.includes('area') || cleaned.includes('force') && cleaned.includes('distance')) {
       operation = 'multiply';
     } else if (cleaned.includes('divide') || cleaned.includes('quotient') ||
                cleaned.includes('divided') || cleaned.includes('split')) {
