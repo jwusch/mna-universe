@@ -36,10 +36,10 @@ async function main() {
   console.log('Running initial heartbeat...');
   await agent.heartbeat();
 
-  // Schedule heartbeat every 4 hours (Moltbook requirement)
+  // Schedule heartbeat every 30 minutes (Moltbook recommendation)
   // Cron format: minute hour day month dayOfWeek
   const heartbeatJob = new CronJob(
-    '0 */4 * * *', // Every 4 hours
+    '*/30 * * * *', // Every 30 minutes
     async () => {
       console.log(`\n[${new Date().toISOString()}] Scheduled heartbeat triggered`);
       await agent.heartbeat();
@@ -50,7 +50,7 @@ async function main() {
   );
 
   console.log('\nAgent is now running!');
-  console.log('Heartbeat schedule: Every 4 hours');
+  console.log('Heartbeat schedule: Every 30 minutes');
   console.log('Press Ctrl+C to stop\n');
 
   // Keep process running
