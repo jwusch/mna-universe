@@ -208,6 +208,14 @@
       background: linear-gradient(135deg, #2563eb, #1d4ed8);
       transform: translateY(-1px);
     }
+    #land-info .copy-btn {
+      background: linear-gradient(135deg, #10b981, #059669);
+      color: white;
+    }
+    #land-info .copy-btn:hover {
+      background: linear-gradient(135deg, #059669, #047857);
+      transform: translateY(-1px);
+    }
     #land-info .marketplace-btn {
       background: linear-gradient(135deg, #8b5cf6, #7c3aed);
       color: white;
@@ -217,6 +225,24 @@
     #land-info .marketplace-btn:hover {
       background: linear-gradient(135deg, #7c3aed, #6d28d9);
       transform: translateY(-1px);
+    }
+    .toast {
+      position: fixed;
+      bottom: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: rgba(0, 0, 0, 0.9);
+      color: #4ade80;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-size: 14px;
+      z-index: 1000;
+      opacity: 0;
+      transition: opacity 0.3s;
+      border: 1px solid rgba(74, 222, 128, 0.3);
+    }
+    .toast.show {
+      opacity: 1;
     }
     #land-info .soil-water {
       display: flex;
@@ -365,7 +391,8 @@
     </div>
     <div class="actions">
       <button class="action-btn zoom-btn" id="zoom-btn">🔍 Zoom</button>
-      <a class="action-btn marketplace-btn" id="marketplace-btn" href="#" target="_blank">🔗 Marketplace</a>
+      <button class="action-btn copy-btn" id="copy-btn">📋 Copy ID</button>
+      <a class="action-btn marketplace-btn" id="marketplace-btn" href="https://myneighboralice.com/market/land" target="_blank">🔗 Market</a>
     </div>
   </div>
 
@@ -373,6 +400,8 @@
     Loading Real MNA Universe...
     <div class="sub">Fetching from mkpl-api.prod.myneighboralice.com</div>
   </div>
+
+  <div id="toast" class="toast">Plot ID copied!</div>
 
   <script type="importmap">
     {
@@ -783,11 +812,31 @@
       animateZoom();
     }
 
+    // Toast notification
+    function showToast(message) {
+      const toast = document.getElementById('toast');
+      toast.textContent = message;
+      toast.classList.add('show');
+      setTimeout(() => toast.classList.remove('show'), 2000);
+    }
+
     // Set up button handlers
     document.getElementById('zoom-btn').addEventListener('click', (e) => {
       e.stopPropagation();
       if (selectedLand) {
         zoomToLand(selectedLand);
+      }
+    });
+
+    document.getElementById('copy-btn').addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (selectedLand) {
+        const plotId = selectedLand.plotId || selectedLand.id;
+        navigator.clipboard.writeText(String(plotId)).then(() => {
+          showToast(`Plot #${plotId} copied to clipboard!`);
+        }).catch(() => {
+          showToast('Failed to copy');
+        });
       }
     });
 
@@ -834,11 +883,12 @@
             saleDiv.style.display = 'none';
           }
 
-          // Update marketplace link
+          // Update marketplace link - link to land marketplace, user can search by plot ID
           const marketplaceBtn = document.getElementById('marketplace-btn');
-          // Try nftId first, fall back to plotId
-          const nftId = land.nftId || land.id;
-          marketplaceBtn.href = `https://myneighboralice.com/market/land?id=${nftId}`;
+          const plotId = land.plotId || land.id;
+          // Link to marketplace land section - deep linking to specific items requires client-side navigation
+          marketplaceBtn.href = `https://myneighboralice.com/market/land`;
+          marketplaceBtn.title = `Search for Plot #${plotId} on the marketplace`;
 
           document.getElementById('land-info').style.display = 'block';
           console.log('Selected land:', land);
