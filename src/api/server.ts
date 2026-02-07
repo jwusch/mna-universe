@@ -70,7 +70,23 @@ let lastFetch = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Fetch real land data from MNA Marketplace API
+ * Fetch a single page of lands from MNA API
+ */
+async function fetchLandPage(cursor?: number): Promise<{ lands: any[]; nextCursor?: number; total: number }> {
+  const url = cursor
+    ? `${MNA_API_BASE}/api/nfts?type=land&cursor=${cursor}`
+    : `${MNA_API_BASE}/api/nfts?type=land`;
+
+  const response = await axios.get(url);
+  return {
+    lands: response.data.result || [],
+    nextCursor: response.data.cursor,
+    total: response.data.total || 0,
+  };
+}
+
+/**
+ * Fetch ALL real land data from MNA Marketplace API with pagination
  */
 async function fetchRealLands(): Promise<RealLand[]> {
   const now = Date.now();
@@ -78,17 +94,24 @@ async function fetchRealLands(): Promise<RealLand[]> {
     return landCache;
   }
 
-  console.log('[API] Fetching real land data from MNA Marketplace...');
+  console.log('[API] Fetching ALL real land data from MNA Marketplace...');
 
   try {
-    // Fetch all lands and lands for sale in parallel
-    const [allLandsRes, forSaleRes] = await Promise.all([
-      axios.get(`${MNA_API_BASE}/api/nfts?type=land&limit=500`),
-      axios.get(`${MNA_API_BASE}/api/nfts?type=land&status=onSale&limit=500`),
-    ]);
+    // First, fetch all lands for sale to build the price map
+    let forSaleLands: any[] = [];
+    let forSaleCursor: number | undefined;
 
-    const allLands = allLandsRes.data.result || [];
-    const forSaleLands = forSaleRes.data.result || [];
+    console.log('[API] Fetching lands for sale...');
+    do {
+      const url = forSaleCursor
+        ? `${MNA_API_BASE}/api/nfts?type=land&status=onSale&cursor=${forSaleCursor}`
+        : `${MNA_API_BASE}/api/nfts?type=land&status=onSale`;
+      const response = await axios.get(url);
+      forSaleLands = forSaleLands.concat(response.data.result || []);
+      forSaleCursor = response.data.cursor;
+    } while (forSaleCursor);
+
+    console.log(`[API] Found ${forSaleLands.length} lands for sale`);
 
     // Create a map of lands for sale with their prices
     const forSaleMap = new Map<number, { price: number; seller: string }>();
@@ -97,18 +120,39 @@ async function fetchRealLands(): Promise<RealLand[]> {
       const sale = nft.latestSale;
       if (plotId && sale) {
         forSaleMap.set(plotId, {
-          price: sale.listingPrice ? sale.listingPrice / 1000000 : 0, // Convert to ALICE
+          price: sale.listingPrice ? sale.listingPrice / 1000000 : 0,
           seller: sale.seller?.nickName || sale.seller?.wallet?.slice(0, 6) + '...' || 'Unknown',
         });
       }
     });
+
+    // Now fetch ALL lands with pagination
+    const allLands: any[] = [];
+    let cursor: number | undefined;
+    let totalLands = 0;
+    let pageCount = 0;
+
+    console.log('[API] Fetching all lands with pagination...');
+    do {
+      const page = await fetchLandPage(cursor);
+      allLands.push(...page.lands);
+      cursor = page.nextCursor;
+      totalLands = page.total;
+      pageCount++;
+
+      if (pageCount % 10 === 0) {
+        console.log(`[API] Progress: ${allLands.length}/${totalLands} lands fetched...`);
+      }
+    } while (cursor && allLands.length < totalLands);
+
+    console.log(`[API] Fetched ${allLands.length} total lands in ${pageCount} pages`);
 
     // Transform to our format
     const lands: RealLand[] = [];
     const seenPlots = new Set<number>();
 
     // Process all lands
-    [...allLands, ...forSaleLands].forEach((nft: any) => {
+    allLands.forEach((nft: any) => {
       const land = nft.metadata?.land;
       if (!land) return;
 
@@ -139,7 +183,7 @@ async function fetchRealLands(): Promise<RealLand[]> {
       });
     });
 
-    console.log(`[API] Fetched ${lands.length} real lands (${forSaleMap.size} for sale)`);
+    console.log(`[API] Processed ${lands.length} unique lands (${forSaleMap.size} for sale)`);
 
     landCache = lands;
     lastFetch = now;
@@ -166,15 +210,14 @@ function transformForVisualization(lands: RealLand[]) {
     maxY = Math.max(maxY, land.y);
   });
 
-  // Normalize coordinates to a reasonable grid
-  const rangeX = maxX - minX || 1;
-  const rangeY = maxY - minY || 1;
-  const scale = 20; // Target grid size
+  // Scale factor: divide by 100 to get reasonable 3D coordinates
+  // Original coords are like 5400-10500, so divide by 100 = 54-105 range
+  const scaleFactor = 100;
 
   return lands.map(land => {
-    // Normalize to 0-20 range
-    const normX = ((land.x - minX) / rangeX) * scale;
-    const normY = ((land.y - minY) / rangeY) * scale;
+    // Use actual coordinates divided by scale factor for proper spacing
+    const normX = land.x / scaleFactor;
+    const normY = land.y / scaleFactor;
 
     // Map region to biome for visualization
     let biome = 'plains';
@@ -194,6 +237,12 @@ function transformForVisualization(lands: RealLand[]) {
       biome = 'desert';
     }
 
+    // Map land size based on width/height
+    let size: 'small' | 'medium' | 'large' = 'medium';
+    const area = land.width * land.height;
+    if (area <= 5000) size = 'small';
+    else if (area >= 20000) size = 'large';
+
     return {
       id: land.id,
       plotId: land.plotId,
@@ -204,7 +253,9 @@ function transformForVisualization(lands: RealLand[]) {
       y: normY,
       realX: land.x,
       realY: land.y,
-      size: 'medium' as const,
+      width: land.width / scaleFactor,
+      height: land.height / scaleFactor,
+      size,
       biome,
       soilType: land.soilType,
       waterType: land.waterType,

@@ -420,14 +420,14 @@
     const stars = new THREE.Points(starGeometry, starMaterial);
     scene.add(stars);
 
-    // Camera
+    // Camera - far clipping plane extended for large world
     const camera = new THREE.PerspectiveCamera(
       60,
       window.innerWidth / window.innerHeight,
       0.1,
-      1000
+      2000
     );
-    camera.position.set(25, 30, 35);
+    camera.position.set(80, 60, 80);
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -437,12 +437,12 @@
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     container.appendChild(renderer.domElement);
 
-    // Controls
+    // Controls - extended for large world
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.minDistance = 5;
-    controls.maxDistance = 100;
+    controls.maxDistance = 500;
     controls.maxPolarAngle = Math.PI / 2.1;
 
     // Lights
@@ -450,24 +450,24 @@
     scene.add(ambientLight);
 
     const sunLight = new THREE.DirectionalLight(0xfff5e0, 1.2);
-    sunLight.position.set(30, 50, 30);
+    sunLight.position.set(100, 80, 60);
     sunLight.castShadow = true;
-    sunLight.shadow.mapSize.width = 2048;
-    sunLight.shadow.mapSize.height = 2048;
+    sunLight.shadow.mapSize.width = 4096;
+    sunLight.shadow.mapSize.height = 4096;
     sunLight.shadow.camera.near = 0.5;
-    sunLight.shadow.camera.far = 150;
-    sunLight.shadow.camera.left = -60;
-    sunLight.shadow.camera.right = 60;
-    sunLight.shadow.camera.top = 60;
-    sunLight.shadow.camera.bottom = -60;
+    sunLight.shadow.camera.far = 400;
+    sunLight.shadow.camera.left = -150;
+    sunLight.shadow.camera.right = 150;
+    sunLight.shadow.camera.top = 150;
+    sunLight.shadow.camera.bottom = -150;
     scene.add(sunLight);
 
     const rimLight = new THREE.DirectionalLight(0x8080ff, 0.3);
     rimLight.position.set(-20, 10, -20);
     scene.add(rimLight);
 
-    // Ocean plane
-    const oceanGeometry = new THREE.PlaneGeometry(300, 300);
+    // Ocean plane - large enough for full coordinate range
+    const oceanGeometry = new THREE.PlaneGeometry(500, 500);
     const oceanMaterial = new THREE.MeshPhongMaterial({
       color: 0x0066aa,
       transparent: true,
@@ -476,7 +476,7 @@
     });
     const ocean = new THREE.Mesh(oceanGeometry, oceanMaterial);
     ocean.rotation.x = -Math.PI / 2;
-    ocean.position.y = -0.5;
+    ocean.position.set(80, -0.5, 45); // Center on the coordinate range
     scene.add(ocean);
 
     // Store land meshes for raycasting
@@ -550,8 +550,13 @@
       const baseHeight = BIOME_HEIGHTS[land.biome] || 0.3;
       const color = BIOME_COLORS[land.biome] || 0x888888;
 
+      // Use actual land dimensions, with a minimum size for visibility
+      const landWidth = Math.max(land.width || 0.8, 0.5);
+      const landDepth = Math.max(land.height || 0.8, 0.5);
+      const landSize = Math.max(landWidth, landDepth);
+
       // Main terrain block
-      const geometry = new THREE.BoxGeometry(0.9, baseHeight + 0.1, 0.9);
+      const geometry = new THREE.BoxGeometry(landWidth * 0.95, baseHeight + 0.1, landDepth * 0.95);
       const material = new THREE.MeshPhongMaterial({
         color: color,
         shininess: land.biome === 'water' ? 80 : 20,
@@ -570,29 +575,30 @@
 
       group.add(mesh);
 
-      // Add decorations based on biome
-      if (land.biome === 'forest') {
-        const treeCount = Math.floor(2 + Math.random() * 2);
+      // Add decorations based on biome (scaled to land size)
+      if (land.biome === 'forest' && landSize > 0.3) {
+        const treeCount = Math.floor(1 + Math.random() * 2);
         for (let i = 0; i < treeCount; i++) {
-          const tx = (Math.random() - 0.5) * 0.6;
-          const tz = (Math.random() - 0.5) * 0.6;
-          const tree = createTree(tx, tz, 0.5 + Math.random() * 0.3);
+          const tx = (Math.random() - 0.5) * landWidth * 0.6;
+          const tz = (Math.random() - 0.5) * landDepth * 0.6;
+          const scale = 0.3 + Math.random() * 0.3;
+          const tree = createTree(tx, tz, scale);
           tree.position.y = baseHeight + 0.1;
           group.add(tree);
         }
       }
 
       // Add buildings to some plains
-      if (land.biome === 'plains' && Math.random() > 0.7) {
+      if (land.biome === 'plains' && Math.random() > 0.85 && landSize > 0.5) {
         const buildingType = Math.random() > 0.5 ? 'house' : 'tower';
-        const building = createBuilding(buildingType, 0.7);
+        const building = createBuilding(buildingType, 0.5);
         building.position.y = baseHeight + 0.1;
         group.add(building);
       }
 
       // For sale glow effect
       if (land.forSale) {
-        const glowGeometry = new THREE.BoxGeometry(1.0, 0.02, 1.0);
+        const glowGeometry = new THREE.BoxGeometry(landWidth, 0.02, landDepth);
         const glowMaterial = new THREE.MeshBasicMaterial({
           color: 0xfbbf24,
           transparent: true,
@@ -603,20 +609,20 @@
         group.add(glow);
 
         // Vertical beam
-        const beamGeometry = new THREE.CylinderGeometry(0.02, 0.02, 2.5, 8);
+        const beamGeometry = new THREE.CylinderGeometry(0.03, 0.03, 3, 8);
         const beamMaterial = new THREE.MeshBasicMaterial({
           color: 0xfbbf24,
           transparent: true,
           opacity: 0.4,
         });
         const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-        beam.position.y = baseHeight + 1.35;
+        beam.position.y = baseHeight + 1.6;
         group.add(beam);
 
         forSaleMeshes.push({ glow, beam, baseOpacity: 0.6 });
       }
 
-      // Position the group using normalized coordinates
+      // Position the group using scaled coordinates
       group.position.set(land.x, 0, land.y);
 
       return group;
@@ -670,10 +676,27 @@
 
           // Center camera on the world
           if (lands.length > 0) {
-            const centerX = lands.reduce((sum, l) => sum + l.x, 0) / lands.length;
-            const centerY = lands.reduce((sum, l) => sum + l.y, 0) / lands.length;
+            // Calculate bounds
+            const xs = lands.map(l => l.x);
+            const ys = lands.map(l => l.y);
+            const minX = Math.min(...xs);
+            const maxX = Math.max(...xs);
+            const minY = Math.min(...ys);
+            const maxY = Math.max(...ys);
+
+            const centerX = (minX + maxX) / 2;
+            const centerY = (minY + maxY) / 2;
+            const worldWidth = maxX - minX;
+            const worldDepth = maxY - minY;
+            const worldSize = Math.max(worldWidth, worldDepth);
+
             controls.target.set(centerX, 0, centerY);
-            camera.position.set(centerX + 15, 20, centerY + 20);
+            // Position camera to see the entire world
+            const cameraDistance = worldSize * 0.6;
+            camera.position.set(centerX + cameraDistance * 0.5, cameraDistance * 0.4, centerY + cameraDistance * 0.5);
+
+            console.log(`World bounds: X(${minX.toFixed(1)}-${maxX.toFixed(1)}), Y(${minY.toFixed(1)}-${maxY.toFixed(1)})`);
+            console.log(`World center: (${centerX.toFixed(1)}, ${centerY.toFixed(1)}), size: ${worldSize.toFixed(1)}`);
           }
 
           document.getElementById('loading').style.display = 'none';
