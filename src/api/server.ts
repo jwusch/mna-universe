@@ -10,7 +10,6 @@
 import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
-import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -18,6 +17,8 @@ import axios from 'axios';
 import { CronJob } from 'cron';
 import { AliceClient, Land } from '../alice/client.js';
 import { AliceMoltbookAgent } from '../agent/agent.js';
+import { authMiddleware, tierRateLimiter, tierAccessCheck } from './auth/middleware.js';
+import { adminRouter } from './auth/admin.js';
 
 dotenv.config();
 
@@ -56,15 +57,13 @@ app.use(helmet({
 }));
 app.use(cors({ origin: ALLOWED_ORIGINS }));
 
-// Rate limiting
-const apiLimiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { success: false, error: 'Too many requests, please try again later' },
-});
-app.use('/api/', apiLimiter);
+// Auth middleware: extract API key, validate, attach tier, rate limit per tier
+app.use('/api/', authMiddleware);
+app.use('/api/', tierRateLimiter);
+app.use('/api/', tierAccessCheck);
+
+// Admin routes (protected by ADMIN_API_KEY)
+app.use('/api/admin', adminRouter);
 
 // Serve static files from visualization directory
 app.use(express.static(path.join(__dirname, '../visualization'), {
@@ -353,12 +352,22 @@ app.get('/api/v1/lands', async (req, res) => {
       lands = lands.filter(l => l.region.toLowerCase().includes(region));
     }
 
+    // Free tier: cap results at 50
+    const tier = req.auth?.tier || 'free';
+    const totalBeforeCap = lands.length;
+    if (tier === 'free') {
+      lands = lands.slice(0, 50);
+    }
+
     res.json({
       success: true,
       data: lands,
       source: 'mna-marketplace-api',
+      tier,
+      ...(tier === 'free' && totalBeforeCap > 50 ? { limited: true, message: 'Free tier limited to 50 results. Use an API key for full access.' } : {}),
       stats: {
         total: lands.length,
+        totalAvailable: totalBeforeCap,
         forSale: lands.filter(l => l.forSale).length,
         islands: [...new Set(realLands.map(l => l.island))],
         regions: [...new Set(realLands.map(l => l.region))],
@@ -412,10 +421,17 @@ app.get('/api/v1/marketplace', async (req, res) => {
       land: nft.metadata?.land,
     }));
 
+    // Free tier: cap results at 20
+    const tier = req.auth?.tier || 'free';
+    const limited = tier === 'free' && transformed.length > 20;
+    const data = tier === 'free' ? transformed.slice(0, 20) : transformed;
+
     res.json({
       success: true,
-      data: transformed,
+      data,
       source: 'mna-marketplace-api',
+      tier,
+      ...(limited ? { limited: true, message: 'Free tier limited to 20 results. Use an API key for full access.' } : {}),
     });
   } catch (error) {
     console.error('[API] Error fetching marketplace:', error);
@@ -482,20 +498,25 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
   console.log(`
 ╔═══════════════════════════════════════════════════════════╗
-║   My Neighbor Alice Universe - REAL DATA Edition 🐇       ║
+║   My Neighbor Alice Universe - REAL DATA Edition          ║
 ╠═══════════════════════════════════════════════════════════╣
 ║  Server running at: http://localhost:${String(PORT).padEnd(5)}                ║
 ║                                                           ║
 ║  Data Sources:                                            ║
-║    • MNA Marketplace API (REAL land data!)                ║
-║    • Chromia Blockchain (ALICE/BJORN tokens)              ║
+║    MNA Marketplace API (REAL land data!)                  ║
+║    Chromia Blockchain (ALICE/BJORN tokens)                ║
 ║                                                           ║
-║  API endpoints:                                           ║
+║  API endpoints (tiered access):                           ║
 ║    GET /api/v1/lands       - Real land plots              ║
-║    GET /api/v1/lands/raw   - Raw land data                ║
+║    GET /api/v1/lands/raw   - Raw land data     [pro]      ║
 ║    GET /api/v1/marketplace - Items for sale               ║
-║    GET /api/v1/assets      - FT4 tokens                   ║
+║    GET /api/v1/assets      - FT4 tokens        [basic+]   ║
 ║    GET /api/v1/health      - Health check                 ║
+║                                                           ║
+║  Admin: POST/GET/DELETE /api/admin/keys                   ║
+║         GET /api/admin/usage                              ║
+║                                                           ║
+║  Auth: ${process.env.ADMIN_API_KEY ? 'ADMIN_API_KEY configured' : 'ADMIN_API_KEY not set (admin disabled)'}
 ╠═══════════════════════════════════════════════════════════╣
 ║  3D Visualization: http://localhost:${String(PORT).padEnd(5)}                 ║
 ╚═══════════════════════════════════════════════════════════╝
