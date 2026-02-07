@@ -70,19 +70,36 @@ let lastFetch = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
 
 /**
- * Fetch a single page of lands from MNA API
+ * Delay helper for rate limiting
  */
-async function fetchLandPage(cursor?: number): Promise<{ lands: any[]; nextCursor?: number; total: number }> {
+const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+
+/**
+ * Fetch a single page of lands from MNA API with retry
+ */
+async function fetchLandPage(cursor?: number, retries = 3): Promise<{ lands: any[]; nextCursor?: number; total: number }> {
   const url = cursor
     ? `${MNA_API_BASE}/api/nfts?type=land&cursor=${cursor}`
     : `${MNA_API_BASE}/api/nfts?type=land`;
 
-  const response = await axios.get(url);
-  return {
-    lands: response.data.result || [],
-    nextCursor: response.data.cursor,
-    total: response.data.total || 0,
-  };
+  for (let attempt = 1; attempt <= retries; attempt++) {
+    try {
+      const response = await axios.get(url, { timeout: 30000 });
+      return {
+        lands: response.data.result || [],
+        nextCursor: response.data.cursor,
+        total: response.data.total || 0,
+      };
+    } catch (error: any) {
+      console.error(`[API] Page fetch failed (attempt ${attempt}/${retries}):`, error.message);
+      if (attempt < retries) {
+        await delay(1000 * attempt); // Exponential backoff
+      } else {
+        throw error;
+      }
+    }
+  }
+  return { lands: [], total: 0 };
 }
 
 /**
@@ -134,14 +151,24 @@ async function fetchRealLands(): Promise<RealLand[]> {
 
     console.log('[API] Fetching all lands with pagination...');
     do {
-      const page = await fetchLandPage(cursor);
-      allLands.push(...page.lands);
-      cursor = page.nextCursor;
-      totalLands = page.total;
-      pageCount++;
+      try {
+        const page = await fetchLandPage(cursor);
+        allLands.push(...page.lands);
+        cursor = page.nextCursor;
+        totalLands = page.total;
+        pageCount++;
 
-      if (pageCount % 10 === 0) {
-        console.log(`[API] Progress: ${allLands.length}/${totalLands} lands fetched...`);
+        if (pageCount % 10 === 0) {
+          console.log(`[API] Progress: ${allLands.length}/${totalLands} lands fetched...`);
+        }
+
+        // Small delay between requests to avoid rate limiting
+        if (cursor) {
+          await delay(100);
+        }
+      } catch (error: any) {
+        console.error(`[API] Failed to fetch page ${pageCount + 1}, stopping pagination:`, error.message);
+        break;
       }
     } while (cursor && allLands.length < totalLands);
 
