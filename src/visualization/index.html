@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>My Neighbor Alice Universe - 3D Visualization</title>
+  <title>My Neighbor Alice Universe - REAL DATA 3D Visualization</title>
   <style>
     * {
       margin: 0;
@@ -23,25 +23,37 @@
       position: absolute;
       top: 10px;
       left: 10px;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.85);
       color: #fff;
       padding: 15px 20px;
       border-radius: 12px;
       font-size: 14px;
-      max-width: 320px;
+      max-width: 340px;
       z-index: 100;
       border: 1px solid rgba(125, 211, 252, 0.3);
       backdrop-filter: blur(10px);
     }
     #info h1 {
-      font-size: 20px;
-      margin-bottom: 12px;
+      font-size: 18px;
+      margin-bottom: 8px;
       color: #7dd3fc;
       text-shadow: 0 0 20px rgba(125, 211, 252, 0.5);
     }
+    #info .real-data-badge {
+      display: inline-block;
+      background: linear-gradient(135deg, #22c55e, #16a34a);
+      color: white;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 10px;
+      font-weight: bold;
+      margin-left: 8px;
+      text-transform: uppercase;
+    }
     #info p {
-      margin: 6px 0;
+      margin: 5px 0;
       color: #aaa;
+      font-size: 12px;
     }
     #info .highlight {
       color: #fbbf24;
@@ -50,7 +62,7 @@
       position: absolute;
       top: 10px;
       right: 10px;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.85);
       color: #fff;
       padding: 15px 20px;
       border-radius: 12px;
@@ -58,25 +70,38 @@
       z-index: 100;
       border: 1px solid rgba(251, 191, 36, 0.3);
       backdrop-filter: blur(10px);
+      min-width: 200px;
     }
     #stats h3 {
       color: #fbbf24;
       margin-bottom: 10px;
+      font-size: 14px;
     }
     #stats .stat {
       display: flex;
       justify-content: space-between;
       margin: 5px 0;
+      font-size: 13px;
     }
     #stats .stat-value {
       color: #4ade80;
       font-weight: bold;
     }
+    #stats .source {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 11px;
+      color: #666;
+    }
+    #stats .source span {
+      color: #22c55e;
+    }
     #legend {
       position: absolute;
       bottom: 10px;
       left: 10px;
-      background: rgba(0, 0, 0, 0.75);
+      background: rgba(0, 0, 0, 0.85);
       color: #fff;
       padding: 15px 20px;
       border-radius: 12px;
@@ -106,26 +131,32 @@
       position: absolute;
       bottom: 10px;
       right: 10px;
-      background: rgba(0, 0, 0, 0.85);
+      background: rgba(0, 0, 0, 0.9);
       color: #fff;
       padding: 20px;
       border-radius: 12px;
       font-size: 14px;
-      max-width: 300px;
+      max-width: 320px;
       z-index: 100;
       display: none;
       border: 1px solid rgba(251, 191, 36, 0.5);
       backdrop-filter: blur(10px);
     }
     #land-info h2 {
-      font-size: 18px;
-      margin-bottom: 12px;
+      font-size: 16px;
+      margin-bottom: 8px;
       color: #fbbf24;
     }
+    #land-info .plot-id {
+      font-size: 11px;
+      color: #666;
+      margin-bottom: 12px;
+    }
     #land-info .detail {
-      margin: 10px 0;
+      margin: 8px 0;
       display: flex;
       justify-content: space-between;
+      font-size: 13px;
     }
     #land-info .label {
       color: #888;
@@ -133,16 +164,37 @@
     #land-info .value {
       color: #fff;
       font-weight: 500;
+      text-align: right;
+      max-width: 60%;
     }
     #land-info .for-sale {
       margin-top: 15px;
       padding: 12px;
       background: linear-gradient(135deg, rgba(34, 197, 94, 0.2), rgba(34, 197, 94, 0.1));
       border-radius: 8px;
-      color: #22c55e;
       text-align: center;
-      font-weight: bold;
       border: 1px solid rgba(34, 197, 94, 0.3);
+    }
+    #land-info .for-sale .price {
+      color: #22c55e;
+      font-size: 20px;
+      font-weight: bold;
+    }
+    #land-info .for-sale .seller {
+      color: #888;
+      font-size: 11px;
+      margin-top: 4px;
+    }
+    #land-info .soil-water {
+      display: flex;
+      gap: 10px;
+      margin-top: 8px;
+      font-size: 11px;
+    }
+    #land-info .soil-water span {
+      padding: 4px 8px;
+      background: rgba(255,255,255,0.1);
+      border-radius: 4px;
     }
     #loading {
       position: absolute;
@@ -152,7 +204,13 @@
       color: #7dd3fc;
       font-size: 20px;
       z-index: 200;
+      text-align: center;
       text-shadow: 0 0 20px rgba(125, 211, 252, 0.5);
+    }
+    #loading .sub {
+      font-size: 14px;
+      color: #888;
+      margin-top: 10px;
     }
     .pulse {
       animation: pulse 2s ease-in-out infinite;
@@ -161,18 +219,40 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
     }
+    #regions {
+      position: absolute;
+      top: 140px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 12px 15px;
+      border-radius: 12px;
+      font-size: 12px;
+      z-index: 100;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(10px);
+      max-height: 200px;
+      overflow-y: auto;
+    }
+    #regions h4 {
+      color: #7dd3fc;
+      margin-bottom: 8px;
+      font-size: 12px;
+    }
+    #regions .region {
+      padding: 3px 0;
+      color: #888;
+    }
   </style>
 </head>
 <body>
   <div id="container"></div>
 
   <div id="info">
-    <h1>My Neighbor Alice Universe</h1>
-    <p>Pan: Right-click + drag</p>
-    <p>Zoom: Scroll wheel</p>
-    <p>Rotate: Left-click + drag</p>
+    <h1>My Neighbor Alice<span class="real-data-badge">REAL DATA</span></h1>
+    <p>Pan: Right-click + drag | Zoom: Scroll | Rotate: Left-click + drag</p>
     <p class="highlight">Click on a land to see details</p>
-    <p class="highlight pulse">Glowing lands are FOR SALE!</p>
+    <p class="highlight pulse">Golden glowing lands are FOR SALE!</p>
   </div>
 
   <div id="stats">
@@ -186,55 +266,76 @@
       <span class="stat-value" id="for-sale-count">0</span>
     </div>
     <div class="stat">
-      <span>Avg Price:</span>
-      <span class="stat-value" id="avg-price">0 ALICE</span>
+      <span>Price Range:</span>
+      <span class="stat-value" id="price-range">-</span>
+    </div>
+    <div class="stat">
+      <span>Islands:</span>
+      <span class="stat-value" id="island-count">0</span>
+    </div>
+    <div class="source">
+      Data: <span id="data-source">loading...</span>
     </div>
   </div>
 
+  <div id="regions">
+    <h4>Regions</h4>
+    <div id="region-list"></div>
+  </div>
+
   <div id="legend">
-    <h3>Biomes</h3>
+    <h3>Regions / Biomes</h3>
     <div class="legend-item">
       <div class="legend-color" style="background: linear-gradient(135deg, #4ade80, #22c55e);"></div>
-      <span>Plains</span>
+      <span>Plains / Wolds</span>
     </div>
     <div class="legend-item">
       <div class="legend-color" style="background: linear-gradient(135deg, #166534, #14532d);"></div>
-      <span>Forest</span>
+      <span>Forest / Gulch</span>
     </div>
     <div class="legend-item">
       <div class="legend-color" style="background: linear-gradient(135deg, #fbbf24, #d4a574);"></div>
-      <span>Desert</span>
+      <span>Desert / Sandy</span>
     </div>
     <div class="legend-item">
       <div class="legend-color" style="background: linear-gradient(135deg, #38bdf8, #0ea5e9);"></div>
-      <span>Water</span>
+      <span>Water / Falls</span>
     </div>
   </div>
 
   <div id="land-info">
     <h2 id="land-name">Land Name</h2>
+    <div class="plot-id" id="plot-id">Plot #0000000</div>
     <div class="detail">
-      <span class="label">Owner</span>
-      <span class="value" id="land-owner">0x...</span>
+      <span class="label">Island</span>
+      <span class="value" id="land-island">Unknown</span>
+    </div>
+    <div class="detail">
+      <span class="label">Region</span>
+      <span class="value" id="land-region">Unknown</span>
     </div>
     <div class="detail">
       <span class="label">Coordinates</span>
       <span class="value" id="land-coords">(0, 0)</span>
     </div>
     <div class="detail">
-      <span class="label">Size</span>
-      <span class="value" id="land-size">Medium</span>
-    </div>
-    <div class="detail">
       <span class="label">Biome</span>
       <span class="value" id="land-biome">Plains</span>
     </div>
+    <div class="soil-water">
+      <span id="land-soil">Soil: unknown</span>
+      <span id="land-water">Water: unknown</span>
+    </div>
     <div id="land-sale" class="for-sale" style="display: none;">
-      FOR SALE: <span id="land-price">100</span> ALICE
+      <div class="price"><span id="land-price">0</span> ALICE</div>
+      <div class="seller">Seller: <span id="land-seller">Unknown</span></div>
     </div>
   </div>
 
-  <div id="loading">Loading Alice Universe...</div>
+  <div id="loading">
+    Loading Real MNA Universe...
+    <div class="sub">Fetching from mkpl-api.prod.myneighboralice.com</div>
+  </div>
 
   <script type="importmap">
     {
@@ -262,14 +363,7 @@
       plains: 0.3,
       forest: 0.5,
       desert: 0.2,
-      water: -0.2,
-    };
-
-    // Size multipliers
-    const SIZE_SCALE = {
-      small: 0.7,
-      medium: 1.0,
-      large: 1.3,
+      water: -0.1,
     };
 
     // Scene setup
@@ -333,7 +427,7 @@
       0.1,
       1000
     );
-    camera.position.set(20, 25, 30);
+    camera.position.set(25, 30, 35);
 
     // Renderer
     const renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -348,7 +442,7 @@
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.minDistance = 5;
-    controls.maxDistance = 80;
+    controls.maxDistance = 100;
     controls.maxPolarAngle = Math.PI / 2.1;
 
     // Lights
@@ -362,19 +456,18 @@
     sunLight.shadow.mapSize.height = 2048;
     sunLight.shadow.camera.near = 0.5;
     sunLight.shadow.camera.far = 150;
-    sunLight.shadow.camera.left = -50;
-    sunLight.shadow.camera.right = 50;
-    sunLight.shadow.camera.top = 50;
-    sunLight.shadow.camera.bottom = -50;
+    sunLight.shadow.camera.left = -60;
+    sunLight.shadow.camera.right = 60;
+    sunLight.shadow.camera.top = 60;
+    sunLight.shadow.camera.bottom = -60;
     scene.add(sunLight);
 
-    // Rim light
     const rimLight = new THREE.DirectionalLight(0x8080ff, 0.3);
     rimLight.position.set(-20, 10, -20);
     scene.add(rimLight);
 
     // Ocean plane
-    const oceanGeometry = new THREE.PlaneGeometry(200, 200);
+    const oceanGeometry = new THREE.PlaneGeometry(300, 300);
     const oceanMaterial = new THREE.MeshPhongMaterial({
       color: 0x0066aa,
       transparent: true,
@@ -395,7 +488,6 @@
     function createTree(x, z, scale = 1) {
       const group = new THREE.Group();
 
-      // Trunk
       const trunkGeometry = new THREE.CylinderGeometry(0.05 * scale, 0.08 * scale, 0.4 * scale, 8);
       const trunkMaterial = new THREE.MeshPhongMaterial({ color: 0x8B4513 });
       const trunk = new THREE.Mesh(trunkGeometry, trunkMaterial);
@@ -403,7 +495,6 @@
       trunk.castShadow = true;
       group.add(trunk);
 
-      // Foliage
       const foliageGeometry = new THREE.ConeGeometry(0.2 * scale, 0.5 * scale, 8);
       const foliageMaterial = new THREE.MeshPhongMaterial({ color: 0x228B22 });
       const foliage = new THREE.Mesh(foliageGeometry, foliageMaterial);
@@ -420,7 +511,6 @@
       const group = new THREE.Group();
 
       if (type === 'house') {
-        // Base
         const baseGeometry = new THREE.BoxGeometry(0.5 * scale, 0.4 * scale, 0.5 * scale);
         const baseMaterial = new THREE.MeshPhongMaterial({ color: 0xf5deb3 });
         const base = new THREE.Mesh(baseGeometry, baseMaterial);
@@ -428,7 +518,6 @@
         base.castShadow = true;
         group.add(base);
 
-        // Roof
         const roofGeometry = new THREE.ConeGeometry(0.45 * scale, 0.3 * scale, 4);
         const roofMaterial = new THREE.MeshPhongMaterial({ color: 0x8B0000 });
         const roof = new THREE.Mesh(roofGeometry, roofMaterial);
@@ -437,7 +526,6 @@
         roof.castShadow = true;
         group.add(roof);
       } else if (type === 'tower') {
-        // Tower body
         const towerGeometry = new THREE.CylinderGeometry(0.15 * scale, 0.2 * scale, 0.8 * scale, 8);
         const towerMaterial = new THREE.MeshPhongMaterial({ color: 0x808080 });
         const tower = new THREE.Mesh(towerGeometry, towerMaterial);
@@ -445,35 +533,12 @@
         tower.castShadow = true;
         group.add(tower);
 
-        // Tower top
         const topGeometry = new THREE.ConeGeometry(0.2 * scale, 0.25 * scale, 8);
         const topMaterial = new THREE.MeshPhongMaterial({ color: 0x4169E1 });
         const top = new THREE.Mesh(topGeometry, topMaterial);
         top.position.y = 0.9 * scale;
         top.castShadow = true;
         group.add(top);
-      } else if (type === 'barn') {
-        // Barn base
-        const barnGeometry = new THREE.BoxGeometry(0.6 * scale, 0.35 * scale, 0.4 * scale);
-        const barnMaterial = new THREE.MeshPhongMaterial({ color: 0xCD853F });
-        const barn = new THREE.Mesh(barnGeometry, barnMaterial);
-        barn.position.y = 0.175 * scale;
-        barn.castShadow = true;
-        group.add(barn);
-
-        // Barn roof
-        const roofShape = new THREE.Shape();
-        roofShape.moveTo(-0.35 * scale, 0);
-        roofShape.lineTo(0, 0.2 * scale);
-        roofShape.lineTo(0.35 * scale, 0);
-        const roofExtrudeSettings = { depth: 0.45 * scale, bevelEnabled: false };
-        const roofGeometry = new THREE.ExtrudeGeometry(roofShape, roofExtrudeSettings);
-        const roofMaterial = new THREE.MeshPhongMaterial({ color: 0x8B0000 });
-        const roof = new THREE.Mesh(roofGeometry, roofMaterial);
-        roof.rotation.x = -Math.PI / 2;
-        roof.position.set(0, 0.35 * scale, -0.225 * scale);
-        roof.castShadow = true;
-        group.add(roof);
       }
 
       return group;
@@ -482,12 +547,11 @@
     // Create land mesh with terrain
     function createLandMesh(land) {
       const group = new THREE.Group();
-      const scale = SIZE_SCALE[land.size] || 1;
       const baseHeight = BIOME_HEIGHTS[land.biome] || 0.3;
       const color = BIOME_COLORS[land.biome] || 0x888888;
 
       // Main terrain block
-      const geometry = new THREE.BoxGeometry(scale * 0.95, baseHeight + 0.1, scale * 0.95);
+      const geometry = new THREE.BoxGeometry(0.9, baseHeight + 0.1, 0.9);
       const material = new THREE.MeshPhongMaterial({
         color: color,
         shininess: land.biome === 'water' ? 80 : 20,
@@ -500,7 +564,6 @@
       mesh.castShadow = true;
       mesh.receiveShadow = true;
 
-      // Store reference to land data
       mesh.userData = { landId: land.id };
       landDataMap.set(land.id, land);
       landMeshes.push(mesh);
@@ -509,31 +572,27 @@
 
       // Add decorations based on biome
       if (land.biome === 'forest') {
-        // Add trees
-        const treeCount = Math.floor(2 + Math.random() * 3);
+        const treeCount = Math.floor(2 + Math.random() * 2);
         for (let i = 0; i < treeCount; i++) {
-          const tx = (Math.random() - 0.5) * scale * 0.7;
-          const tz = (Math.random() - 0.5) * scale * 0.7;
-          const tree = createTree(tx, tz, 0.6 + Math.random() * 0.4);
+          const tx = (Math.random() - 0.5) * 0.6;
+          const tz = (Math.random() - 0.5) * 0.6;
+          const tree = createTree(tx, tz, 0.5 + Math.random() * 0.3);
           tree.position.y = baseHeight + 0.1;
           group.add(tree);
         }
       }
 
       // Add buildings to some plains
-      if (land.biome === 'plains' && Math.random() > 0.6) {
-        const buildingTypes = ['house', 'tower', 'barn'];
-        const buildingType = buildingTypes[Math.floor(Math.random() * buildingTypes.length)];
-        const building = createBuilding(buildingType, scale * 0.8);
+      if (land.biome === 'plains' && Math.random() > 0.7) {
+        const buildingType = Math.random() > 0.5 ? 'house' : 'tower';
+        const building = createBuilding(buildingType, 0.7);
         building.position.y = baseHeight + 0.1;
-        building.position.x = (Math.random() - 0.5) * scale * 0.3;
-        building.position.z = (Math.random() - 0.5) * scale * 0.3;
         group.add(building);
       }
 
       // For sale glow effect
       if (land.forSale) {
-        const glowGeometry = new THREE.BoxGeometry(scale * 1.05, 0.02, scale * 1.05);
+        const glowGeometry = new THREE.BoxGeometry(1.0, 0.02, 1.0);
         const glowMaterial = new THREE.MeshBasicMaterial({
           color: 0xfbbf24,
           transparent: true,
@@ -544,22 +603,21 @@
         group.add(glow);
 
         // Vertical beam
-        const beamGeometry = new THREE.CylinderGeometry(0.02, 0.02, 2, 8);
+        const beamGeometry = new THREE.CylinderGeometry(0.02, 0.02, 2.5, 8);
         const beamMaterial = new THREE.MeshBasicMaterial({
           color: 0xfbbf24,
           transparent: true,
           opacity: 0.4,
         });
         const beam = new THREE.Mesh(beamGeometry, beamMaterial);
-        beam.position.y = baseHeight + 1.1;
+        beam.position.y = baseHeight + 1.35;
         group.add(beam);
 
         forSaleMeshes.push({ glow, beam, baseOpacity: 0.6 });
       }
 
-      // Position the group
-      const spacing = 1.2;
-      group.position.set(land.x * spacing, 0, land.y * spacing);
+      // Position the group using normalized coordinates
+      group.position.set(land.x, 0, land.y);
 
       return group;
     }
@@ -572,16 +630,37 @@
 
         if (result.success && result.data) {
           const lands = result.data;
-          console.log(`Loaded ${lands.length} lands from ${result.source}`);
+          console.log(`Loaded ${lands.length} REAL lands from ${result.source}`);
 
           // Update stats
           document.getElementById('total-lands').textContent = lands.length;
           const forSaleLands = lands.filter(l => l.forSale);
           document.getElementById('for-sale-count').textContent = forSaleLands.length;
+
           if (forSaleLands.length > 0) {
-            const avgPrice = Math.round(forSaleLands.reduce((sum, l) => sum + (l.price || 0), 0) / forSaleLands.length);
-            document.getElementById('avg-price').textContent = `${avgPrice} ALICE`;
+            const prices = forSaleLands.map(l => l.price || 0).filter(p => p > 0);
+            if (prices.length > 0) {
+              const minPrice = Math.min(...prices);
+              const maxPrice = Math.max(...prices);
+              document.getElementById('price-range').textContent = `${minPrice}-${maxPrice} ALICE`;
+            }
           }
+
+          // Update islands and regions
+          if (result.stats) {
+            document.getElementById('island-count').textContent = result.stats.islands?.length || 1;
+
+            const regionList = document.getElementById('region-list');
+            regionList.innerHTML = '';
+            (result.stats.regions || []).slice(0, 8).forEach(region => {
+              const div = document.createElement('div');
+              div.className = 'region';
+              div.textContent = region;
+              regionList.appendChild(div);
+            });
+          }
+
+          document.getElementById('data-source').textContent = result.source;
 
           // Render lands
           lands.forEach(land => {
@@ -589,16 +668,20 @@
             scene.add(mesh);
           });
 
-          // Center camera on the island
-          const centerX = lands.reduce((sum, l) => sum + l.x, 0) / lands.length;
-          const centerY = lands.reduce((sum, l) => sum + l.y, 0) / lands.length;
-          controls.target.set(centerX * 1.2, 0, centerY * 1.2);
+          // Center camera on the world
+          if (lands.length > 0) {
+            const centerX = lands.reduce((sum, l) => sum + l.x, 0) / lands.length;
+            const centerY = lands.reduce((sum, l) => sum + l.y, 0) / lands.length;
+            controls.target.set(centerX, 0, centerY);
+            camera.position.set(centerX + 15, 20, centerY + 20);
+          }
 
           document.getElementById('loading').style.display = 'none';
         }
       } catch (error) {
         console.error('Failed to load lands:', error);
-        document.getElementById('loading').textContent = 'Failed to load lands. Is the server running?';
+        document.getElementById('loading').innerHTML =
+          'Failed to load lands.<br><span class="sub">Is the server running?</span>';
       }
     }
 
@@ -606,7 +689,6 @@
     const raycaster = new THREE.Raycaster();
     const mouse = new THREE.Vector2();
     let selectedMesh = null;
-    let originalColor = null;
 
     function onMouseClick(event) {
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
@@ -615,8 +697,7 @@
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(landMeshes);
 
-      // Reset previous selection
-      if (selectedMesh && originalColor) {
+      if (selectedMesh) {
         selectedMesh.material.emissive.setHex(0x000000);
       }
 
@@ -626,29 +707,29 @@
         const land = landDataMap.get(landId);
 
         if (land) {
-          // Highlight selected land
           selectedMesh = mesh;
-          originalColor = mesh.material.color.getHex();
           mesh.material.emissive.setHex(0x333333);
 
           // Update info panel
           document.getElementById('land-name').textContent = land.name;
-          document.getElementById('land-owner').textContent = land.owner;
-          document.getElementById('land-coords').textContent = `(${land.x}, ${land.y})`;
-          document.getElementById('land-size').textContent = land.size.charAt(0).toUpperCase() + land.size.slice(1);
-          document.getElementById('land-biome').textContent = land.biome.charAt(0).toUpperCase() + land.biome.slice(1);
+          document.getElementById('plot-id').textContent = `Plot #${land.plotId || land.id}`;
+          document.getElementById('land-island').textContent = land.island || 'Unknown';
+          document.getElementById('land-region').textContent = land.region || 'Unknown';
+          document.getElementById('land-coords').textContent = `(${land.realX || land.x}, ${land.realY || land.y})`;
+          document.getElementById('land-biome').textContent = (land.biome || 'plains').charAt(0).toUpperCase() + (land.biome || 'plains').slice(1);
+          document.getElementById('land-soil').textContent = `Soil: ${land.soilType || 'unknown'}`;
+          document.getElementById('land-water').textContent = `Water: ${land.waterType || 'unknown'}`;
 
           const saleDiv = document.getElementById('land-sale');
-          if (land.forSale) {
+          if (land.forSale && land.price) {
             saleDiv.style.display = 'block';
-            document.getElementById('land-price').textContent = land.price || '?';
+            document.getElementById('land-price').textContent = land.price.toFixed(2);
+            document.getElementById('land-seller').textContent = land.seller || 'Unknown';
           } else {
             saleDiv.style.display = 'none';
           }
 
           document.getElementById('land-info').style.display = 'block';
-
-          // Log to console
           console.log('Selected land:', land);
         }
       } else {
@@ -680,7 +761,6 @@
         beam.scale.y = 1 + Math.sin(time * 2) * 0.1;
       });
 
-      // Slowly rotate stars
       stars.rotation.y += 0.0001;
 
       controls.update();
