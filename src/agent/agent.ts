@@ -29,7 +29,7 @@ export interface EnvironmentState {
  * 4. Posts insights about the game ecosystem
  */
 // The deployed 3D visualization URL
-const UNIVERSE_URL = 'https://web-production-87126.up.railway.app';
+const UNIVERSE_URL = process.env.UNIVERSE_URL || 'https://web-production-87126.up.railway.app';
 
 export class AliceMoltbookAgent {
   private moltbook: MoltbookClient;

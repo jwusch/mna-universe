@@ -9,6 +9,8 @@
 
 import express from 'express';
 import cors from 'cors';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -33,12 +35,42 @@ const bigIntReplacer = (key: string, value: any) => {
 };
 const PORT = process.env.PORT || process.env.API_PORT || 3001;
 
-// Middleware
-app.use(cors());
-app.use(express.json());
+// Allowed origins for CORS
+const ALLOWED_ORIGINS = [
+  'http://localhost:3001',
+  'http://localhost:3000',
+  process.env.UNIVERSE_URL || 'https://web-production-87126.up.railway.app',
+].filter(Boolean) as string[];
+
+// Security middleware
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https:"],
+      connectSrc: ["'self'", "https://mkpl-api.prod.myneighboralice.com"],
+    },
+  },
+}));
+app.use(cors({ origin: ALLOWED_ORIGINS }));
+
+// Rate limiting
+const apiLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { success: false, error: 'Too many requests, please try again later' },
+});
+app.use('/api/', apiLimiter);
 
 // Serve static files from visualization directory
-app.use(express.static(path.join(__dirname, '../visualization')));
+app.use(express.static(path.join(__dirname, '../visualization'), {
+  dotfiles: 'deny',
+  index: 'index.html',
+}));
 
 // Initialize Alice client for Chromia blockchain
 const aliceClient = new AliceClient({
@@ -308,15 +340,17 @@ app.get('/api/v1/lands', async (req, res) => {
     const realLands = await fetchRealLands();
     let lands = transformForVisualization(realLands);
 
-    // Apply filters
+    // Apply filters with input validation
     if (req.query.forSale === 'true') {
       lands = lands.filter(l => l.forSale);
     }
-    if (req.query.island) {
-      lands = lands.filter(l => l.island.toLowerCase().includes((req.query.island as string).toLowerCase()));
+    if (typeof req.query.island === 'string' && req.query.island.length <= 100) {
+      const island = req.query.island.toLowerCase();
+      lands = lands.filter(l => l.island.toLowerCase().includes(island));
     }
-    if (req.query.region) {
-      lands = lands.filter(l => l.region.toLowerCase().includes((req.query.region as string).toLowerCase()));
+    if (typeof req.query.region === 'string' && req.query.region.length <= 100) {
+      const region = req.query.region.toLowerCase();
+      lands = lands.filter(l => l.region.toLowerCase().includes(region));
     }
 
     res.json({
@@ -360,8 +394,11 @@ app.get('/api/v1/lands/raw', async (req, res) => {
  */
 app.get('/api/v1/marketplace', async (req, res) => {
   try {
-    const type = req.query.type || 'land';
-    const response = await axios.get(`${MNA_API_BASE}/api/nfts?type=${type}&status=onSale&limit=100`);
+    const allowedTypes = ['land', 'item', 'avatar', 'decoration'];
+    const type = allowedTypes.includes(req.query.type as string) ? req.query.type as string : 'land';
+    const response = await axios.get(`${MNA_API_BASE}/api/nfts`, {
+      params: { type, status: 'onSale', limit: 100 },
+    });
     const items = response.data.result || [];
 
     const transformed = items.map((nft: any) => ({
@@ -433,10 +470,6 @@ app.get('/api/v1/health', async (req, res) => {
 
   res.json({
     status: 'ok',
-    timestamp: new Date().toISOString(),
-    mnaMarketplaceApi: mnaApiStatus,
-    chromiaBlockchain: !!process.env.MNA_BLOCKCHAIN_RID,
-    cachedLands: landCache.length,
   });
 });
 

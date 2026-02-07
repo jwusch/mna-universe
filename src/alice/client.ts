@@ -91,8 +91,6 @@ export class AliceClient {
     }
 
     console.log('[Alice] Connecting to Chromia blockchain...');
-    console.log('[Alice] Node URL:', this.nodeUrl);
-    console.log('[Alice] Blockchain RID:', this.blockchainRid);
 
     try {
       // Create postchain client
