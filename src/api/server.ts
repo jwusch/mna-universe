@@ -13,7 +13,9 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import axios from 'axios';
+import { CronJob } from 'cron';
 import { AliceClient, Land } from '../alice/client.js';
+import { AliceMoltbookAgent } from '../agent/agent.js';
 
 dotenv.config();
 
@@ -470,4 +472,35 @@ app.listen(PORT, () => {
   fetchRealLands().then(lands => {
     console.log(`[API] Pre-loaded ${lands.length} real lands from MNA Marketplace`);
   });
+
+  // Start Moltbook heartbeat agent if API key is configured
+  if (process.env.MOLTBOOK_API_KEY) {
+    const agent = new AliceMoltbookAgent({
+      moltbook: {
+        apiKey: process.env.MOLTBOOK_API_KEY,
+        agentName: process.env.MOLTBOOK_AGENT_NAME || 'MyNeighborAliceBot',
+      },
+      alice: {
+        nodeUrl: process.env.CHROMIA_NODE_URL || 'https://node.chromia.com',
+        blockchainRid: process.env.MNA_BLOCKCHAIN_RID || '',
+      },
+    });
+
+    console.log('[Moltbook] Starting heartbeat agent...');
+    agent.heartbeat().catch(err => console.error('[Moltbook] Initial heartbeat error:', err));
+
+    new CronJob(
+      '*/30 * * * *',
+      async () => {
+        console.log(`[Moltbook] Scheduled heartbeat at ${new Date().toISOString()}`);
+        await agent.heartbeat().catch(err => console.error('[Moltbook] Heartbeat error:', err));
+      },
+      null,
+      true,
+      'UTC'
+    );
+    console.log('[Moltbook] Heartbeat scheduled every 30 minutes');
+  } else {
+    console.log('[Moltbook] No MOLTBOOK_API_KEY set, heartbeat agent disabled');
+  }
 });
