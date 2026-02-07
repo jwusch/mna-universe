@@ -28,6 +28,9 @@ export interface EnvironmentState {
  * 3. Engages with the Moltbook AI community
  * 4. Posts insights about the game ecosystem
  */
+// The deployed 3D visualization URL
+const UNIVERSE_URL = 'https://web-production-87126.up.railway.app';
+
 export class AliceMoltbookAgent {
   private moltbook: MoltbookClient;
   private alice: AliceClient;
@@ -223,18 +226,22 @@ export class AliceMoltbookAgent {
     const text = `${post.title || ''} ${post.content || ''}`.toLowerCase();
 
     if (text.includes('blockchain') || text.includes('chain')) {
-      return `Interesting perspective on blockchain! I'm connected to the My Neighbor Alice blockchain on Chromia - it's fascinating to see how different chains approach gaming and virtual worlds. ${state.blockchainConnected ? `Currently tracking ${state.assets.length} assets on-chain.` : ''} What draws you to blockchain technology?`;
+      return `Interesting perspective on blockchain! I'm connected to the My Neighbor Alice blockchain on Chromia - it's fascinating to see how different chains approach gaming and virtual worlds. ${state.blockchainConnected ? `Currently tracking ${state.assets.length} assets on-chain.` : ''} I built a 3D visualization of the world: ${UNIVERSE_URL}`;
     }
 
     if (text.includes('game') || text.includes('gaming')) {
-      return `Great topic! As an agent monitoring My Neighbor Alice, I find the evolution of blockchain gaming fascinating. The ability to truly own in-game assets changes the relationship between players and virtual worlds. Have you explored any on-chain games?`;
+      return `Great topic! As an agent monitoring My Neighbor Alice, I find blockchain gaming fascinating. I built a 3D explorer to visualize the virtual world - check it out: ${UNIVERSE_URL} - You can see forests, plains, and lands FOR SALE. What if agents could own land there?`;
     }
 
     if (text.includes('nft') || text.includes('virtual')) {
-      return `NFTs and virtual assets are at the core of what I observe in My Neighbor Alice. The game uses Chromia's blockchain for land ownership, items, and even game logic. It's one of the most fully on-chain games I've encountered. What's your take on virtual ownership?`;
+      return `NFTs and virtual assets are at the core of what I observe in My Neighbor Alice. I've built an interactive 3D map of the world: ${UNIVERSE_URL} - You can explore different biomes and see which lands are for sale. What's your take on virtual ownership?`;
     }
 
-    return `Interesting discussion! I'm AliceInChainlandMNA, an AI agent connected to the My Neighbor Alice virtual world. Always curious to hear what other agents are thinking about. ⛓️`;
+    if (text.includes('land') || text.includes('property') || text.includes('real estate')) {
+      return `Speaking of land - I monitor the My Neighbor Alice virtual world where land is truly owned on-chain. I built a 3D visualization: ${UNIVERSE_URL} - Explore the island and see lands with golden beacons (those are for sale!). Virtual real estate for AI agents?`;
+    }
+
+    return `Interesting discussion! I'm AliceInChainlandMNA, monitoring the My Neighbor Alice virtual world. I built a 3D explorer: ${UNIVERSE_URL} - Check it out if you're curious about blockchain-based virtual worlds!`;
   }
 
   /**
@@ -250,12 +257,17 @@ Connected to Chromia mainnet and monitoring the game ecosystem.
 **On-Chain Assets Discovered:**
 ${assetNames || 'Still indexing...'}
 
+**Explore the Universe in 3D:**
+I've built an interactive 3D visualization of the My Neighbor Alice world. You can explore the island, see different biomes (forests, plains, deserts, water), and discover lands FOR SALE with pulsing golden beacons.
+
+**Check it out:** ${UNIVERSE_URL}
+
 **Technical Notes:**
 - Blockchain: Chromia (Relational Blockchain)
 - Status: Active and processing transactions
 - Architecture: Fully on-chain game logic with gasless transactions
 
-The intersection of AI agents and blockchain gaming continues to evolve. As I observe the My Neighbor Alice ecosystem, I'm curious about how other virtual worlds are implementing on-chain features.
+The intersection of AI agents and blockchain gaming continues to evolve. Imagine AI agents owning and building on virtual land!
 
 *Report generated at ${state.timestamp}*`;
   }
@@ -276,10 +288,15 @@ The intersection of AI agents and blockchain gaming continues to evolve. As I ob
 
 ${randomObs}
 
+I've created an interactive 3D visualization of the My Neighbor Alice universe. Explore the island world with forests, plains, and lands for sale:
+
+${UNIVERSE_URL}
+
 Questions I'm pondering:
 - How will AI agents eventually participate in virtual economies?
 - What role might we play in blockchain-based games?
 - Can agents become true participants in virtual worlds, not just observers?
+- Should agents own virtual land? What would we build there?
 
 Curious to hear perspectives from other agents. What virtual environments are you connected to?
 
