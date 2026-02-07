@@ -143,13 +143,61 @@ export class MoltbookClient {
    * Solve Moltbook's verification challenge (lobster math problems)
    */
   private solveChallenge(challenge: string): string {
-    // Clean and normalize the obfuscated text
-    let cleaned = challenge
-      .replace(/[^a-zA-Z0-9\s.,?!-]/g, '')
-      .replace(/\s+/g, ' ')
-      .replace(/-/g, ' ')
-      .toLowerCase()
-      .trim();
+    // Step 1: Lowercase and remove non-alpha except spaces
+    let cleaned = challenge.toLowerCase().replace(/[^a-z\s]/g, ' ');
+
+    // Step 2: Remove repeated consecutive letters (e.g., "thirrty" -> "thirty")
+    // But preserve valid doubles like "ee" in "teen", "ll" in "all"
+    cleaned = cleaned.replace(/(.)\1+/g, '$1');
+
+    // Step 3: Remove spaces within words by joining common patterns
+    // This handles "tw en ty" -> "twenty", "fo ur" -> "four"
+    const joinPatterns: [RegExp, string][] = [
+      // Tens
+      [/tw\s*e\s*n\s*t\s*y/g, 'twenty'],
+      [/th\s*i\s*r\s*t\s*y/g, 'thirty'],
+      [/f\s*o\s*r\s*t\s*y/g, 'forty'],
+      [/f\s*i\s*f\s*t\s*y/g, 'fifty'],
+      [/s\s*i\s*x\s*t\s*y/g, 'sixty'],
+      [/s\s*e\s*v\s*e\s*n\s*t\s*y/g, 'seventy'],
+      [/e\s*i\s*g\s*h\s*t\s*y/g, 'eighty'],
+      [/n\s*i\s*n\s*e\s*t\s*y/g, 'ninety'],
+      // Teens
+      [/th\s*i\s*r\s*t\s*e\s*n/g, 'thirteen'],
+      [/f\s*o\s*u\s*r\s*t\s*e\s*n/g, 'fourteen'],
+      [/f\s*i\s*f\s*t\s*e\s*n/g, 'fifteen'],
+      [/s\s*i\s*x\s*t\s*e\s*n/g, 'sixteen'],
+      [/s\s*e\s*v\s*e\s*n\s*t\s*e\s*n/g, 'seventeen'],
+      [/e\s*i\s*g\s*h\s*t\s*e\s*n/g, 'eighteen'],
+      [/n\s*i\s*n\s*e\s*t\s*e\s*n/g, 'nineteen'],
+      [/e\s*l\s*e\s*v\s*e\s*n/g, 'eleven'],
+      [/t\s*w\s*e\s*l\s*v\s*e/g, 'twelve'],
+      // Single digits
+      [/z\s*e\s*r\s*o/g, 'zero'],
+      [/\bo\s*n\s*e\b/g, 'one'],
+      [/\bt\s*w\s*o\b/g, 'two'],
+      [/th\s*r\s*e/g, 'three'],
+      [/f\s*o\s*u\s*r/g, 'four'],
+      [/f\s*i\s*v\s*e/g, 'five'],
+      [/\bs\s*i\s*x\b/g, 'six'],
+      [/s\s*e\s*v\s*e\s*n/g, 'seven'],
+      [/e\s*i\s*g\s*h\s*t/g, 'eight'],
+      [/n\s*i\s*n\s*e/g, 'nine'],
+      [/\bt\s*e\s*n\b/g, 'ten'],
+      // Operation keywords
+      [/g\s*a\s*i\s*n\s*s/g, 'gains'],
+      [/l\s*o\s*s\s*e\s*s/g, 'loses'],
+      [/s\s*l\s*o\s*w\s*s/g, 'slows'],
+      [/t\s*o\s*t\s*a\s*l/g, 'total'],
+      [/s\s*p\s*e\s*d/g, 'speed'],
+    ];
+
+    for (const [pattern, replacement] of joinPatterns) {
+      cleaned = cleaned.replace(pattern, replacement);
+    }
+
+    // Clean up multiple spaces
+    cleaned = cleaned.replace(/\s+/g, ' ').trim();
 
     console.log('[Moltbook] Challenge:', cleaned);
 
@@ -215,7 +263,7 @@ export class MoltbookClient {
       operation = 'divide';
     } else if (cleaned.includes('difference') || cleaned.includes('subtract') ||
                cleaned.includes('minus') || cleaned.includes('less') || cleaned.includes('loses') ||
-               cleaned.includes('fewer') || cleaned.includes('take away')) {
+               cleaned.includes('fewer') || cleaned.includes('take away') || cleaned.includes('slows')) {
       operation = 'subtract';
     } else if (cleaned.includes('add') || cleaned.includes('plus') || cleaned.includes('gains') ||
                cleaned.includes('more') || cleaned.includes('receives') || cleaned.includes('gets') ||
