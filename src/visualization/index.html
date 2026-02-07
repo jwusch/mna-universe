@@ -208,22 +208,14 @@
       background: linear-gradient(135deg, #2563eb, #1d4ed8);
       transform: translateY(-1px);
     }
-    #land-info .copy-btn {
-      background: linear-gradient(135deg, #10b981, #059669);
-      color: white;
-    }
-    #land-info .copy-btn:hover {
-      background: linear-gradient(135deg, #059669, #047857);
-      transform: translateY(-1px);
-    }
-    #land-info .marketplace-btn {
-      background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+    #land-info .map-btn {
+      background: linear-gradient(135deg, #f59e0b, #d97706);
       color: white;
       text-decoration: none;
       text-align: center;
     }
-    #land-info .marketplace-btn:hover {
-      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+    #land-info .map-btn:hover {
+      background: linear-gradient(135deg, #d97706, #b45309);
       transform: translateY(-1px);
     }
     .toast {
@@ -391,8 +383,7 @@
     </div>
     <div class="actions">
       <button class="action-btn zoom-btn" id="zoom-btn">🔍 Zoom</button>
-      <button class="action-btn copy-btn" id="copy-btn">📋 Copy ID</button>
-      <a class="action-btn marketplace-btn" id="marketplace-btn" href="https://myneighboralice.com/market/land" target="_blank">🔗 Market</a>
+      <a class="action-btn map-btn" id="map-btn" href="#" target="_blank">🗺️ MNA Map</a>
     </div>
   </div>
 
@@ -828,17 +819,6 @@
       }
     });
 
-    document.getElementById('copy-btn').addEventListener('click', (e) => {
-      e.stopPropagation();
-      if (selectedLand) {
-        const plotId = selectedLand.plotId || selectedLand.id;
-        navigator.clipboard.writeText(String(plotId)).then(() => {
-          showToast(`Plot #${plotId} copied to clipboard!`);
-        }).catch(() => {
-          showToast('Failed to copy');
-        });
-      }
-    });
 
     function onMouseClick(event) {
       // Ignore clicks on the info panel
@@ -883,12 +863,11 @@
             saleDiv.style.display = 'none';
           }
 
-          // Update marketplace link - link to land marketplace, user can search by plot ID
-          const marketplaceBtn = document.getElementById('marketplace-btn');
+          // Update MNA map link - deep link to specific land plot
+          const mapBtn = document.getElementById('map-btn');
           const plotId = land.plotId || land.id;
-          // Link to marketplace land section - deep linking to specific items requires client-side navigation
-          marketplaceBtn.href = `https://myneighboralice.com/market/land`;
-          marketplaceBtn.title = `Search for Plot #${plotId} on the marketplace`;
+          mapBtn.href = `https://myneighboralice.com/map/${plotId}`;
+          mapBtn.title = `View Plot #${plotId} on MNA in-game map`;
 
           document.getElementById('land-info').style.display = 'block';
           console.log('Selected land:', land);
