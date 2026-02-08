@@ -328,7 +328,7 @@
     }
     #leaderboard {
       position: absolute;
-      top: 200px;
+      top: 250px;
       left: 10px;
       background: rgba(0, 0, 0, 0.85);
       color: #fff;
@@ -408,6 +408,172 @@
       opacity: 0.7;
       pointer-events: none;
       display: none;
+    }
+
+    /* Player Search */
+    #player-search {
+      position: absolute;
+      top: 155px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 12px 15px;
+      border-radius: 12px;
+      font-size: 14px;
+      z-index: 100;
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      backdrop-filter: blur(10px);
+      min-width: 220px;
+    }
+    #player-search h3 {
+      color: #06b6d4;
+      margin-bottom: 8px;
+      font-size: 14px;
+    }
+    #search-input {
+      width: 100%;
+      padding: 6px 10px;
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      border-radius: 6px;
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.2s;
+    }
+    #search-input:focus {
+      border-color: #06b6d4;
+    }
+    #search-input::placeholder {
+      color: #666;
+    }
+    #search-result {
+      margin-top: 10px;
+      font-size: 12px;
+    }
+    #search-result .sr-detail {
+      display: flex;
+      justify-content: space-between;
+      margin: 4px 0;
+    }
+    #search-result .sr-label {
+      color: #888;
+    }
+    #search-result .sr-value {
+      color: #06b6d4;
+      font-weight: bold;
+    }
+    #search-result .sr-plots {
+      margin-top: 6px;
+      padding-top: 6px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    #search-result .sr-plots .sr-plot-btn {
+      display: inline-block;
+      background: rgba(6, 182, 212, 0.15);
+      border: 1px solid rgba(6, 182, 212, 0.3);
+      color: #06b6d4;
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      margin: 2px;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #search-result .sr-plots .sr-plot-btn:hover {
+      background: rgba(6, 182, 212, 0.3);
+    }
+    #search-error {
+      color: #f87171;
+      font-size: 12px;
+      margin-top: 6px;
+    }
+
+    /* Storefront */
+    #storefront {
+      position: absolute;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 15px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      z-index: 100;
+      border: 1px solid rgba(34, 197, 94, 0.3);
+      backdrop-filter: blur(10px);
+      min-width: 200px;
+      max-height: 300px;
+      overflow-y: auto;
+    }
+    #storefront h3 {
+      color: #22c55e;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    #storefront-list .sf-item {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin: 4px 0;
+      font-size: 12px;
+      padding: 3px 0;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+    }
+    #storefront-list .sf-name {
+      color: #ddd;
+      flex: 1;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 100px;
+    }
+    #storefront-list .sf-price {
+      color: #22c55e;
+      font-weight: bold;
+      font-size: 11px;
+      margin-left: 8px;
+    }
+    #storefront-list .sf-count {
+      color: #666;
+      font-size: 10px;
+      margin-left: 6px;
+      min-width: 30px;
+      text-align: right;
+    }
+    #storefront .source {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 11px;
+      color: #666;
+    }
+    #storefront .source span {
+      color: #22c55e;
+    }
+
+    /* Plot Deep Dive */
+    #plot-deep-dive .section-divider {
+      border-top: 1px solid rgba(139, 92, 246, 0.3);
+      margin: 12px 0;
+    }
+    .deep-dive-section {
+      margin: 8px 0;
+    }
+    .deep-dive-section .section-title {
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      color: #8b5cf6;
+      margin-bottom: 4px;
+    }
+    .deep-dive-section .dd-content {
+      font-size: 12px;
+      color: #ccc;
+      line-height: 1.5;
+    }
+    #land-info {
+      max-height: 70vh;
+      overflow-y: auto;
     }
   </style>
 </head>
@@ -490,6 +656,19 @@
     </div>
   </div>
 
+  <div id="player-search">
+    <h3>Player Lookup</h3>
+    <input type="text" id="search-input" placeholder="Search player..." />
+    <div id="search-result" style="display:none;"></div>
+    <div id="search-error" style="display:none;"></div>
+  </div>
+
+  <div id="storefront">
+    <h3>P2P Marketplace</h3>
+    <div id="storefront-list">Loading...</div>
+    <div class="source">Source: <span id="sf-source">loading...</span></div>
+  </div>
+
   <div id="leaderboard">
     <h3>Top Players (XP)</h3>
     <div id="leaderboard-list"></div>
@@ -551,6 +730,21 @@
     <div class="actions">
       <button class="action-btn zoom-btn" id="zoom-btn">🔍 Zoom</button>
       <a class="action-btn map-btn" id="map-btn" href="#" target="_blank">🗺️ MNA Map</a>
+    </div>
+    <div id="plot-deep-dive" style="display:none;">
+      <div class="section-divider"></div>
+      <div class="deep-dive-section">
+        <div class="section-title">🌾 Farming</div>
+        <div class="dd-content" id="plot-farming">Loading...</div>
+      </div>
+      <div class="deep-dive-section">
+        <div class="section-title">🐟 Fishing</div>
+        <div class="dd-content" id="plot-fishing">Loading...</div>
+      </div>
+      <div class="deep-dive-section">
+        <div class="section-title">⛏️ Resources</div>
+        <div class="dd-content" id="plot-nodes">Loading...</div>
+      </div>
     </div>
   </div>
 
@@ -1064,8 +1258,8 @@
 
 
     function onMouseClick(event) {
-      // Ignore clicks on the info panel
-      if (event.target.closest('#land-info')) return;
+      // Ignore clicks on UI panels
+      if (event.target.closest('#land-info') || event.target.closest('#player-search') || event.target.closest('#storefront')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -1114,9 +1308,58 @@
 
           document.getElementById('land-info').style.display = 'block';
           console.log('Selected land:', land);
+
+          // Deep dive: fetch plot details
+          const deepDive = document.getElementById('plot-deep-dive');
+          deepDive.style.display = 'block';
+          document.getElementById('plot-farming').textContent = 'Loading...';
+          document.getElementById('plot-fishing').textContent = 'Loading...';
+          document.getElementById('plot-nodes').textContent = 'Loading...';
+
+          fetch(`/api/v1/plots/${plotId}`)
+            .then(r => r.json())
+            .then(data => {
+              if (!data.success) { deepDive.style.display = 'none'; return; }
+
+              // Farming
+              if (data.farming && data.farming.length > 0) {
+                const mature = data.farming.filter(f => f.current_state === 'mature').length;
+                const growing = data.farming.filter(f => f.plant && f.current_state !== 'mature').length;
+                const plantNames = [...new Set(data.farming.filter(f => f.plant).map(f => f.plant.name.replace('seed_', '').replace(/_/g, ' ')))];
+                document.getElementById('plot-farming').innerHTML =
+                  `${mature} mature, ${growing} growing<br><small style="color:#888">${plantNames.slice(0,3).join(', ')}</small>`;
+              } else {
+                document.getElementById('plot-farming').textContent = 'No crops planted';
+              }
+
+              // Fishing
+              if (data.fishing && data.fishing.length > 0) {
+                const names = data.fishing.map(f => f.name.replace('fish_', '').replace(/_/g, ' '));
+                document.getElementById('plot-fishing').innerHTML =
+                  `${names.length} species<br><small style="color:#888">${names.slice(0,4).join(', ')}</small>`;
+              } else {
+                document.getElementById('plot-fishing').textContent = 'No fish data';
+              }
+
+              // Resource nodes
+              if (data.nodes && data.nodes.length > 0) {
+                const groups = {};
+                data.nodes.forEach(n => {
+                  const type = n.node_prototype_name.replace('resourcenode_', '').replace(/_t\d+/, '');
+                  groups[type] = (groups[type] || 0) + 1;
+                });
+                const summary = Object.entries(groups).map(([k,v]) => `${v} ${k}`).join(', ');
+                document.getElementById('plot-nodes').innerHTML =
+                  `${data.nodes.length} nodes<br><small style="color:#888">${summary}</small>`;
+              } else {
+                document.getElementById('plot-nodes').textContent = 'No resource nodes';
+              }
+            })
+            .catch(() => { deepDive.style.display = 'none'; });
         }
       } else {
         document.getElementById('land-info').style.display = 'none';
+        document.getElementById('plot-deep-dive').style.display = 'none';
         selectedMesh = null;
         selectedLand = null;
       }
@@ -1265,11 +1508,131 @@
       }
     }
 
+    // Player search
+    document.getElementById('search-input').addEventListener('keydown', (e) => {
+      if (e.key !== 'Enter') return;
+      const username = e.target.value.trim();
+      if (!username) return;
+
+      const resultDiv = document.getElementById('search-result');
+      const errorDiv = document.getElementById('search-error');
+      resultDiv.style.display = 'none';
+      errorDiv.style.display = 'none';
+      resultDiv.innerHTML = '';
+
+      fetch(`/api/v1/players/${encodeURIComponent(username)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.player) {
+            errorDiv.textContent = 'Player not found';
+            errorDiv.style.display = 'block';
+            return;
+          }
+
+          const p = data.player;
+          const prog = data.progression || {};
+          const plots = data.plots || {};
+          const xp = prog.xp_balance != null ? Number(prog.xp_balance).toLocaleString() : '--';
+          const rank = prog.rank != null ? prog.rank : '--';
+          const moxie = prog.moxie_balance != null ? `${prog.moxie_balance}/${prog.max_moxie || '--'}` : '--';
+          const plotCount = plots.count != null ? plots.count : '--';
+
+          let html = `
+            <div class="sr-detail"><span class="sr-label">Player</span><span class="sr-value">${p.username}</span></div>
+            <div class="sr-detail"><span class="sr-label">XP</span><span class="sr-value">${xp}</span></div>
+            <div class="sr-detail"><span class="sr-label">Rank</span><span class="sr-value">${rank}</span></div>
+            <div class="sr-detail"><span class="sr-label">Moxie</span><span class="sr-value">${moxie}</span></div>
+            <div class="sr-detail"><span class="sr-label">Plots</span><span class="sr-value">${plotCount}</span></div>
+          `;
+
+          if (plots.plotNumbers && plots.plotNumbers.length > 0) {
+            html += `<div class="sr-plots"><span class="sr-label">View plots:</span><br>`;
+            plots.plotNumbers.forEach(pn => {
+              html += `<span class="sr-plot-btn" data-plot="${pn}">#${pn}</span>`;
+            });
+            html += `</div>`;
+          }
+
+          resultDiv.innerHTML = html;
+          resultDiv.style.display = 'block';
+
+          // Attach click handlers for plot buttons
+          resultDiv.querySelectorAll('.sr-plot-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+              const plotNum = btn.dataset.plot;
+              // Find land in map by plotId
+              for (const [id, land] of landDataMap) {
+                if (String(land.plotId) === plotNum || String(land.id) === plotNum) {
+                  zoomToLand(land);
+                  break;
+                }
+              }
+            });
+          });
+        })
+        .catch(() => {
+          errorDiv.textContent = 'Failed to fetch player data';
+          errorDiv.style.display = 'block';
+        });
+    });
+
+    // Storefront
+    async function loadStorefront() {
+      try {
+        const response = await fetch('/api/v1/storefront/listings');
+        const r = await response.json();
+        const listEl = document.getElementById('storefront-list');
+
+        if (!r.success || !r.listings || r.listings.length === 0) {
+          listEl.textContent = 'No listings available';
+          document.getElementById('sf-source').textContent = 'Offline';
+          return;
+        }
+
+        listEl.innerHTML = '';
+        const sorted = r.listings.slice().sort((a, b) => b.totalListings - a.totalListings);
+        sorted.slice(0, 15).forEach(item => {
+          const div = document.createElement('div');
+          div.className = 'sf-item';
+          const name = item.name.replace(/_/g, ' ');
+          const floor = item.floorAlice != null ? Number(item.floorAlice).toLocaleString() : '--';
+          div.innerHTML = `
+            <span class="sf-name" title="${name}">${name}</span>
+            <span class="sf-price">${floor} ALICE</span>
+            <span class="sf-count">x${item.totalAmount || item.totalListings}</span>
+          `;
+          listEl.appendChild(div);
+        });
+
+        document.getElementById('sf-source').textContent = 'Chromia P2P';
+      } catch (error) {
+        console.warn('Failed to load storefront:', error);
+        document.getElementById('storefront-list').textContent = 'Failed to load';
+        document.getElementById('sf-source').textContent = 'Offline';
+      }
+    }
+
+    // Position storefront dynamically below chain-stats
+    function positionStorefront() {
+      const chainStats = document.getElementById('chain-stats');
+      const storefront = document.getElementById('storefront');
+      if (chainStats && storefront) {
+        const rect = chainStats.getBoundingClientRect();
+        storefront.style.top = (rect.bottom + 10) + 'px';
+      }
+    }
+
     // Initialize
     loadLands();
     loadChainStats();
     loadEconomy();
     loadLeaderboard();
+    loadStorefront();
+    // Refresh storefront every 2 minutes
+    setInterval(loadStorefront, 2 * 60 * 1000);
+    // Position storefront after a brief delay for layout
+    setTimeout(positionStorefront, 500);
+    window.addEventListener('resize', positionStorefront);
     animate();
   </script>
 </body>

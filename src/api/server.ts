@@ -836,6 +836,18 @@ app.get('/api/v1/leaderboard', async (req, res) => {
   }
 });
 
+// Per-plot cache (5 min TTL)
+const plotCache = new Map<number, { data: any; timestamp: number }>();
+const PLOT_CACHE_TTL = 5 * 60 * 1000;
+
+// Per-player cache (5 min TTL)
+const playerCache = new Map<string, { data: any; timestamp: number }>();
+const PLAYER_CACHE_TTL = 5 * 60 * 1000;
+
+// Storefront listings cache (2 min TTL)
+let storefrontCache: { data: any; timestamp: number } | null = null;
+const STOREFRONT_CACHE_TTL = 2 * 60 * 1000;
+
 // Economy cache (10 min TTL — game content changes slowly)
 let economyCache: { data: any; timestamp: number } | null = null;
 const ECONOMY_TTL = 10 * 60 * 1000;
@@ -943,6 +955,260 @@ app.get('/api/v1/economy', async (req, res) => {
 });
 
 /**
+ * GET /api/v1/plots/:plotNumber
+ * Returns detailed plot data from the Chromia blockchain
+ */
+app.get('/api/v1/plots/:plotNumber', async (req, res) => {
+  try {
+    const plotNumber = parseInt(req.params.plotNumber, 10);
+    if (isNaN(plotNumber)) {
+      res.status(400).json({ success: false, error: 'Invalid plot number' });
+      return;
+    }
+
+    // Check per-plot cache
+    const now = Date.now();
+    const cached = plotCache.get(plotNumber);
+    if (cached && (now - cached.timestamp) < PLOT_CACHE_TTL) {
+      res.set('Cache-Control', 'public, max-age=300');
+      const jsonStr = JSON.stringify({ success: true, ...cached.data, cached: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    // Generate plot_id Buffer from plot_number
+    const plotId = await client.query('plots.generate_plot_id', { plot_number: plotNumber });
+
+    // Query all plot data in parallel
+    const [plotMeta, plotMap, farmingState, fishList, plotNodes] = await Promise.allSettled([
+      client.query('plots.get_plot_meta', { plot_id: plotId }),
+      client.query('plots.get_plot_map', { plot_id: plotId }),
+      client.query('farming.state_at_plot', { plot_id: plotId }),
+      client.query('fishing.get_fish_master_list', { plot_id: plotId }),
+      client.query('plot_nodes.get_nodes_on_plot', { plot_id: plotId }),
+    ]);
+
+    const data = {
+      plotNumber,
+      meta: plotMeta.status === 'fulfilled' ? plotMeta.value : null,
+      map: plotMap.status === 'fulfilled' ? plotMap.value : null,
+      farming: farmingState.status === 'fulfilled' ? farmingState.value : null,
+      fishing: fishList.status === 'fulfilled' ? fishList.value : null,
+      nodes: plotNodes.status === 'fulfilled' ? plotNodes.value : null,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    plotCache.set(plotNumber, { data, timestamp: now });
+
+    res.set('Cache-Control', 'public, max-age=300');
+    const jsonStr = JSON.stringify({ success: true, ...data }, bigIntReplacer);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(jsonStr);
+  } catch (error: any) {
+    console.error('[API] Error fetching plot:', error);
+    // Return stale cache on error
+    const stale = plotCache.get(parseInt(req.params.plotNumber, 10));
+    if (stale) {
+      const jsonStr = JSON.stringify({ success: true, ...stale.data, cached: true, stale: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch plot data' });
+  }
+});
+
+/**
+ * GET /api/v1/players/:username
+ * Returns player profile data from the Chromia blockchain
+ */
+app.get('/api/v1/players/:username', async (req, res) => {
+  try {
+    const username = req.params.username;
+    if (!username || username.length > 50) {
+      res.status(400).json({ success: false, error: 'Invalid username' });
+      return;
+    }
+
+    // Check per-player cache (case-insensitive key)
+    const cacheKey = username.toLowerCase();
+    const now = Date.now();
+    const cached = playerCache.get(cacheKey);
+    if (cached && (now - cached.timestamp) < PLAYER_CACHE_TTL) {
+      res.set('Cache-Control', 'public, max-age=300');
+      const jsonStr = JSON.stringify({ success: true, ...cached.data, cached: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    // Find player by username
+    const player = await client.query('player.find_by_username', { username }) as any;
+    if (!player) {
+      res.status(404).json({ success: false, error: 'Player not found' });
+      return;
+    }
+
+    // Get plots, progression, and leaderboard position in parallel
+    const [plots, progression, leaderboardPos] = await Promise.allSettled([
+      client.query('plots.get_plot_ids_by_player', { username }),
+      client.query('player_progression.get_player_progression', { account_id: player.id }),
+      client.query('player_progression.get_player_leaderboard_position', { account_id: player.id }),
+    ]);
+
+    // Structure plots data with count and plot numbers
+    const plotsRaw = plots.status === 'fulfilled' && Array.isArray(plots.value) ? plots.value : [];
+    const plotNumbers = plotsRaw.map((p: any) => p.plot_number ?? p).filter(Boolean);
+
+    // Merge progression + leaderboard position
+    const prog = progression.status === 'fulfilled' ? progression.value as any : null;
+    const lbPos = leaderboardPos.status === 'fulfilled' ? leaderboardPos.value : null;
+
+    const data = {
+      player: {
+        username: player.username,
+        tokens: player.tokens,
+        dateOfBirth: player.date_of_birth,
+        isGuest: player.is_guest,
+        residence: player.residence,
+      },
+      plots: {
+        count: plotsRaw.length,
+        plotNumbers,
+      },
+      progression: prog ? {
+        ...prog,
+        rank: lbPos ?? null,
+      } : null,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    playerCache.set(cacheKey, { data, timestamp: now });
+
+    res.set('Cache-Control', 'public, max-age=300');
+    const jsonStr = JSON.stringify({ success: true, ...data }, bigIntReplacer);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(jsonStr);
+  } catch (error: any) {
+    console.error('[API] Error fetching player:', error);
+    // Return stale cache on error
+    const stale = playerCache.get(req.params.username?.toLowerCase());
+    if (stale) {
+      const jsonStr = JSON.stringify({ success: true, ...stale.data, cached: true, stale: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch player data' });
+  }
+});
+
+/**
+ * GET /api/v1/storefront/listings
+ * Returns storefront floor prices for game assets from the Chromia blockchain
+ */
+app.get('/api/v1/storefront/listings', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    if (storefrontCache && (now - storefrontCache.timestamp) < STOREFRONT_CACHE_TTL) {
+      res.set('Cache-Control', 'public, max-age=120');
+      const jsonStr = JSON.stringify({ success: true, ...storefrontCache.data, cached: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    // Get all assets
+    const allAssets = await client.query('assets.get_all_assets', {});
+    const assetList = Array.isArray(allAssets) ? allAssets : (allAssets as any)?.data || [];
+
+    // Pick first 20 assets and query floor prices in parallel
+    const sample = assetList.slice(0, 20);
+    const floorPrices = await Promise.allSettled(
+      sample.map((a: any) => client.query('storefronts.get_floor_price_for_listing', { asset_id: a.id }))
+    );
+
+    // Combine: name + floor price data, filter out nulls
+    const listings = sample
+      .map((asset: any, i: number) => {
+        const priceResult = floorPrices[i];
+        const priceData = priceResult.status === 'fulfilled' ? priceResult.value : null;
+        if (!priceData) return null;
+        return {
+          name: asset.name,
+          templateName: asset.template_name,
+          floorAlice: (priceData as any).cheapest_item_alice ?? null,
+          floorBjorn: (priceData as any).cheapest_item_bjorn ?? null,
+          totalAmount: (priceData as any).total_amount ?? null,
+          totalListings: (priceData as any).total_listings ?? null,
+        };
+      })
+      .filter(Boolean);
+
+    const data = {
+      listings,
+      totalAssetsQueried: sample.length,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    storefrontCache = { data, timestamp: now };
+
+    res.set('Cache-Control', 'public, max-age=120');
+    const jsonStr = JSON.stringify({ success: true, ...data }, bigIntReplacer);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(jsonStr);
+  } catch (error: any) {
+    console.error('[API] Error fetching storefront listings:', error);
+    // Return stale cache on error
+    if (storefrontCache) {
+      const jsonStr = JSON.stringify({ success: true, ...storefrontCache.data, cached: true, stale: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch storefront listings' });
+  }
+});
+
+/**
  * GET /api/v1/health
  * Health check endpoint
  */
@@ -985,6 +1251,9 @@ app.listen(PORT, () => {
 ║    GET /api/v1/chain-stats - Chromia blockchain stats     ║
 ║    GET /api/v1/leaderboard - Top players + whales         ║
 ║    GET /api/v1/economy     - Game economy data            ║
+║    GET /api/v1/plots/:id   - Plot deep-dive    [tier2]    ║
+║    GET /api/v1/players/:u  - Player lookup     [tier2]    ║
+║    GET /api/v1/storefront/listings - Floor prices [tier2] ║
 ║    GET /api/v1/health      - Health check                 ║
 ║                                                           ║
 ║  Admin: POST/GET/DELETE /api/admin/keys                   ║
