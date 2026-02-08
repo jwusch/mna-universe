@@ -1526,10 +1526,24 @@
       }
     }
 
-    window.addEventListener('click', onMouseClick, false);
+    // Use timer to distinguish single-click from double-click
+    let clickTimer = null;
+    let suppressClick = false;
+
+    window.addEventListener('click', (event) => {
+      if (suppressClick) return;
+      // Delay single-click handling to allow dblclick to cancel it
+      if (clickTimer) clearTimeout(clickTimer);
+      clickTimer = setTimeout(() => {
+        clickTimer = null;
+        onMouseClick(event);
+      }, 250);
+    }, false);
 
     // Double-click to zoom + show deep-dive details
     window.addEventListener('dblclick', (event) => {
+      // Cancel any pending single-click
+      if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
       if (event.target.closest('.draggable-panel') || event.target.closest('#land-info') || event.target.closest('#info') || event.target.closest('#stats')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
