@@ -52,7 +52,7 @@ app.use(helmet({
       scriptSrc: ["'self'", "'unsafe-inline'", "https://cdnjs.cloudflare.com", "https://cdn.jsdelivr.net", "https://unpkg.com"],
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https:"],
-      connectSrc: ["'self'", "https://mkpl-api.prod.myneighboralice.com"],
+      connectSrc: ["'self'", "https://mkpl-api.prod.myneighboralice.com", "https://dapps0.chromaway.com:7740", "https://node.chromia.com"],
     },
   },
 }));
@@ -632,6 +632,77 @@ app.get('/api/v1/assets', async (req, res) => {
   } catch (error) {
     console.error('[API] Error fetching assets:', error);
     res.status(500).json({ success: false, error: 'Failed to fetch assets' });
+  }
+});
+
+// Chain stats cache
+let chainStatsCache: { data: any; timestamp: number } | null = null;
+const CHAIN_STATS_TTL = 5 * 60 * 1000; // 5 minutes
+
+/**
+ * GET /api/v1/chain-stats
+ * Returns live blockchain stats from Chromia (public data, free queries)
+ */
+app.get('/api/v1/chain-stats', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    // Return cached if fresh
+    if (chainStatsCache && (now - chainStatsCache.timestamp) < CHAIN_STATS_TTL) {
+      res.set('Cache-Control', 'public, max-age=300');
+      const jsonStr = JSON.stringify({ success: true, ...chainStatsCache.data, cached: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+
+    // Ensure client is connected
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    // Query multiple stats in parallel
+    const [accountCount, gameInfo, allAssets, storefrontConfigs] = await Promise.allSettled([
+      client.query('assets.get_account_count', {}),
+      client.query('game_info.get_all', {}),
+      client.query('assets.get_all_assets', {}),
+      client.query('storefronts.get_storefronts_configs', {}),
+    ]);
+
+    const stats = {
+      players: accountCount.status === 'fulfilled' ? accountCount.value : null,
+      gameVersion: gameInfo.status === 'fulfilled' ? (gameInfo.value as any)?.version || gameInfo.value : null,
+      gameInfo: gameInfo.status === 'fulfilled' ? gameInfo.value : null,
+      assetCount: allAssets.status === 'fulfilled' && Array.isArray(allAssets.value) ? allAssets.value.length : null,
+      storefrontConfig: storefrontConfigs.status === 'fulfilled' ? storefrontConfigs.value : null,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    // Cache the result
+    chainStatsCache = { data: stats, timestamp: now };
+
+    res.set('Cache-Control', 'public, max-age=300');
+    const jsonStr = JSON.stringify({ success: true, ...stats }, bigIntReplacer);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(jsonStr);
+  } catch (error: any) {
+    console.error('[API] Error fetching chain stats:', error);
+    // Return stale cache on error
+    if (chainStatsCache) {
+      const jsonStr = JSON.stringify({ success: true, ...chainStatsCache.data, cached: true, stale: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch chain stats' });
   }
 });
 

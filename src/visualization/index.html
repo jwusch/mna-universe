@@ -272,7 +272,7 @@
     }
     #regions {
       position: absolute;
-      top: 140px;
+      top: 370px;
       right: 10px;
       background: rgba(0, 0, 0, 0.85);
       color: #fff;
@@ -293,6 +293,45 @@
     #regions .region {
       padding: 3px 0;
       color: #888;
+    }
+    #chain-stats {
+      position: absolute;
+      top: 160px;
+      right: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 15px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      z-index: 100;
+      border: 1px solid rgba(124, 58, 237, 0.3);
+      backdrop-filter: blur(10px);
+      min-width: 200px;
+    }
+    #chain-stats h3 {
+      color: #a78bfa;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    #chain-stats .stat {
+      display: flex;
+      justify-content: space-between;
+      margin: 5px 0;
+      font-size: 13px;
+    }
+    #chain-stats .stat-value {
+      color: #c4b5fd;
+      font-weight: bold;
+    }
+    #chain-stats .source {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 11px;
+      color: #666;
+    }
+    #chain-stats .source span {
+      color: #7c3aed;
     }
     #updating {
       position: fixed;
@@ -345,6 +384,29 @@
   <div id="regions">
     <h4>Regions</h4>
     <div id="region-list"></div>
+  </div>
+
+  <div id="chain-stats">
+    <h3>Chromia Blockchain</h3>
+    <div class="stat">
+      <span>Total Players:</span>
+      <span class="stat-value" id="chain-players">--</span>
+    </div>
+    <div class="stat">
+      <span>On-Chain Assets:</span>
+      <span class="stat-value" id="chain-assets">--</span>
+    </div>
+    <div class="stat">
+      <span>Game Version:</span>
+      <span class="stat-value" id="chain-version">--</span>
+    </div>
+    <div class="stat">
+      <span>Storefront:</span>
+      <span class="stat-value" id="chain-storefront">--</span>
+    </div>
+    <div class="source">
+      Source: <span id="chain-source">loading...</span>
+    </div>
   </div>
 
   <div id="legend">
@@ -1005,8 +1067,50 @@
       renderer.render(scene, camera);
     }
 
+    // Fetch Chromia blockchain stats
+    async function loadChainStats() {
+      try {
+        const response = await fetch('/api/v1/chain-stats');
+        const result = await response.json();
+
+        if (result.success) {
+          if (result.players != null) {
+            document.getElementById('chain-players').textContent = Number(result.players).toLocaleString();
+          }
+          if (result.assetCount != null) {
+            document.getElementById('chain-assets').textContent = result.assetCount.toLocaleString();
+          }
+          if (result.gameVersion) {
+            document.getElementById('chain-version').textContent = result.gameVersion;
+          } else if (result.gameInfo) {
+            // Try extracting version from gameInfo object
+            const info = result.gameInfo;
+            const ver = info.version || info.game_version || (typeof info === 'string' ? info : JSON.stringify(info).slice(0, 20));
+            document.getElementById('chain-version').textContent = ver;
+          }
+          if (result.storefrontConfig) {
+            const config = result.storefrontConfig;
+            if (Array.isArray(config) && config.length > 0) {
+              document.getElementById('chain-storefront').textContent = `${config.length} active`;
+            } else if (config.enabled !== undefined) {
+              document.getElementById('chain-storefront').textContent = config.enabled ? 'Enabled' : 'Disabled';
+            } else {
+              document.getElementById('chain-storefront').textContent = 'Active';
+            }
+          }
+          document.getElementById('chain-source').textContent = 'Chromia Mainnet';
+        } else {
+          document.getElementById('chain-source').textContent = 'Offline';
+        }
+      } catch (error) {
+        console.warn('Failed to load chain stats:', error);
+        document.getElementById('chain-source').textContent = 'Offline';
+      }
+    }
+
     // Initialize
     loadLands();
+    loadChainStats();
     animate();
   </script>
 </body>

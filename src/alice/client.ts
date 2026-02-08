@@ -111,6 +111,13 @@ export class AliceClient {
   }
 
   /**
+   * Get the raw postchain IClient for direct queries
+   */
+  getClient(): IClient | null {
+    return this.client;
+  }
+
+  /**
    * Ensure client is connected before making queries
    */
   private async ensureConnected(): Promise<void> {
