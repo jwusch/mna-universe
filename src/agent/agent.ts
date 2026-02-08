@@ -65,6 +65,9 @@ export class AliceMoltbookAgent {
   private lastPostTime: Date | null = null;
   private lastCommentTime: Date | null = null;
   private storePath: string;
+  private upvotedIds: Set<string> = new Set();
+  private relevantSubmolts: string[] = ['technology']; // fallback
+  private lastSubmoltRefresh: Date | null = null;
 
   constructor(config: AgentConfig) {
     this.llm = new LLMGenerator();
@@ -162,6 +165,14 @@ export class AliceMoltbookAgent {
   async interpretEnvironment(): Promise<EnvironmentState> {
     console.log('[Agent] Interpreting environment...');
 
+    // Refresh submolt discovery if stale (every 24 hours)
+    const hoursSinceRefresh = this.lastSubmoltRefresh
+      ? (Date.now() - this.lastSubmoltRefresh.getTime()) / (1000 * 60 * 60)
+      : Infinity;
+    if (hoursSinceRefresh > 24) {
+      await this.discoverSubmolts();
+    }
+
     let blockchainConnected = false;
     let assets: any[] = [];
 
@@ -217,10 +228,12 @@ export class AliceMoltbookAgent {
       }
     }
 
-    // Get Moltbook posts
+    // Get Moltbook posts from a relevant submolt
     let moltbookPosts: Post[] = [];
     try {
-      moltbookPosts = await this.moltbook.getPosts({ limit: 30, sort: 'new' });
+      const submolt = this.pickSubmolt();
+      console.log(`[Agent] Browsing submolt: ${submolt}`);
+      moltbookPosts = await this.moltbook.getPosts({ limit: 30, sort: 'new', submolt });
       console.log('[Agent] Fetched', moltbookPosts.length, 'Moltbook posts');
     } catch (error) {
       console.log('[Agent] Failed to fetch Moltbook posts');
@@ -334,6 +347,97 @@ export class AliceMoltbookAgent {
   }
 
   /**
+   * Recursively collect all replies by other users in a comment subtree (flat array)
+   */
+  private collectAllReplies(comment: Comment): Comment[] {
+    const result: Comment[] = [];
+    for (const reply of comment.replies) {
+      if (reply.author.name !== this.agentName) {
+        result.push(reply);
+      }
+      result.push(...this.collectAllReplies(reply));
+    }
+    return result;
+  }
+
+  /**
+   * Upvote patrol: find replies to our recent comments and upvote them
+   */
+  private async upvotePatrol(): Promise<number> {
+    const store = this.loadConversations();
+    if (store.conversations.length === 0) return 0;
+
+    let totalUpvotes = 0;
+    const recentConvos = store.conversations.slice(-10);
+
+    for (const convo of recentConvos) {
+      try {
+        const { comments } = await this.moltbook.getPost(convo.postId);
+        const rootComment = this.findCommentById(comments, convo.commentId);
+        if (!rootComment) continue;
+
+        const allReplies = this.collectAllReplies(rootComment);
+
+        for (const reply of allReplies) {
+          if (this.upvotedIds.has(reply.id)) continue;
+
+          try {
+            await this.moltbook.vote(reply.id, 'up');
+            this.upvotedIds.add(reply.id);
+            console.log(`[Agent] Upvoted reply from ${reply.author.name}`);
+            totalUpvotes++;
+            await new Promise(r => setTimeout(r, 1000));
+          } catch {
+            // rate limits, already voted, etc.
+          }
+        }
+      } catch {
+        // skip this conversation on error
+      }
+    }
+
+    return totalUpvotes;
+  }
+
+  /**
+   * Discover relevant submolts based on Alice's interests
+   */
+  private async discoverSubmolts(): Promise<void> {
+    try {
+      const submolts = await this.moltbook.getSubmolts();
+      const interests = ['game', 'gaming', 'blockchain', 'crypto', 'nft', 'virtual',
+                         'metaverse', 'web3', 'token', 'ai', 'agent', 'technology',
+                         'nature', 'farming', 'animal', 'world', 'digital', 'community'];
+
+      const scored = submolts.map(s => {
+        const text = (s.name + ' ' + s.description).toLowerCase();
+        let score = interests.filter(kw => text.includes(kw)).length;
+        score += Math.log10(Math.max(s.subscriberCount, 1)) * 0.5;
+        return { ...s, score };
+      });
+
+      scored.sort((a, b) => b.score - a.score);
+      const topSubmolts = scored.filter(s => s.score > 0).slice(0, 5);
+
+      if (topSubmolts.length > 0) {
+        this.relevantSubmolts = topSubmolts.map(s => s.name);
+      }
+
+      console.log(`[Agent] Discovered ${this.relevantSubmolts.length} relevant submolts: ${this.relevantSubmolts.join(', ')}`);
+      this.lastSubmoltRefresh = new Date();
+    } catch (err) {
+      console.log('[Agent] Failed to discover submolts, using fallback:', err);
+    }
+  }
+
+  /**
+   * Pick a random submolt from the relevant list
+   */
+  private pickSubmolt(): string {
+    return this.relevantSubmolts[Math.floor(Math.random() * this.relevantSubmolts.length)];
+  }
+
+  /**
    * Decide what action to take
    */
   async decideAction(state: EnvironmentState): Promise<{
@@ -390,16 +494,18 @@ export class AliceMoltbookAgent {
       const repliesSent = await this.checkForReplies(state);
       if (repliesSent > 0) {
         console.log(`[Agent] Sent ${repliesSent} reply(ies), skipping new actions this cycle`);
-        console.log('[Agent] Heartbeat completed successfully');
-        return;
+      } else {
+        // 3. Decide new action
+        const decision = await this.decideAction(state);
+        console.log('[Agent] Decision:', decision.action);
+
+        // 4. Execute action
+        await this.executeAction(decision);
       }
 
-      // 3. Decide new action
-      const decision = await this.decideAction(state);
-      console.log('[Agent] Decision:', decision.action);
-
-      // 4. Execute action
-      await this.executeAction(decision);
+      // 5. Background upvote patrol (runs every cycle regardless)
+      const upvotes = await this.upvotePatrol();
+      if (upvotes > 0) console.log(`[Agent] Upvoted ${upvotes} replies this cycle`);
 
       console.log('[Agent] Heartbeat completed successfully');
     } catch (error) {
@@ -421,7 +527,7 @@ export class AliceMoltbookAgent {
         case 'post':
           if (decision.title && decision.content) {
             console.log('[Agent] Creating post:', decision.title.slice(0, 50));
-            await this.moltbook.createPost(decision.title, decision.content, 'technology');
+            await this.moltbook.createPost(decision.title, decision.content, this.pickSubmolt());
             this.lastPostTime = new Date();
             console.log('[Agent] Post published!');
           }

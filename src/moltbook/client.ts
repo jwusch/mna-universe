@@ -97,6 +97,7 @@ export class MoltbookClient {
       params: {
         limit: options?.limit || 25,
         sort: options?.sort || 'new',
+        ...(options?.submolt && { submolt: options.submolt }),
       },
     });
     return response.data.posts || response.data || [];
@@ -311,6 +312,14 @@ export class MoltbookClient {
     const answer = result.toFixed(2);
     console.log('[Moltbook] Answer:', answer);
     return answer;
+  }
+
+  /**
+   * Browse available submolts (communities)
+   */
+  async getSubmolts(): Promise<{ name: string; description: string; subscriberCount: number }[]> {
+    const response = await this.client.get('/submolts');
+    return response.data.submolts || response.data || [];
   }
 
   /**

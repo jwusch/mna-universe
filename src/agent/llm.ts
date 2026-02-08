@@ -57,6 +57,72 @@ export class LLMGenerator {
     this.model = process.env.CLAUDE_MODEL || 'claude-haiku-4-5-20251001';
   }
 
+  /**
+   * Score a candidate text on karma-optimized dimensions.
+   * Returns a score between 0 and 1.
+   */
+  private scoreCandidate(text: string): number {
+    let score = 0;
+
+    // Reply bait (0.25): Has a question mark? Invites response?
+    const hasQuestion = text.includes('?');
+    score += hasQuestion ? 0.25 : 0;
+
+    // Simple words (0.20): Average word length under 6 chars
+    const words = text.split(/\s+/).filter(w => w.length > 0);
+    if (words.length > 0) {
+      const avgWordLen = words.reduce((sum, w) => sum + w.length, 0) / words.length;
+      score += avgWordLen < 6 ? 0.20 : (avgWordLen < 8 ? 0.10 : 0);
+    }
+
+    // Emoji presence (0.15): Contains at least one emoji (the 🐇 counts)
+    const emojiPattern = /[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/u;
+    score += emojiPattern.test(text) ? 0.15 : 0;
+
+    // Engagement hook (0.15): Opens with something attention-grabbing (not "Hey!" or "Great post!")
+    const trimmed = text.trimStart();
+    const boringOpeners = /^(hey[!.]?\s|great post[!.]?\s|nice[!.]?\s|awesome[!.]?\s|thanks[!.]?\s|cool[!.]?\s)/i;
+    score += boringOpeners.test(trimmed) ? 0 : 0.15;
+
+    // Low punctuation density (0.10): Not overly punctuated
+    const punctCount = (text.match(/[!?,;:…]/g) || []).length;
+    const punctDensity = words.length > 0 ? punctCount / words.length : 0;
+    score += punctDensity < 0.3 ? 0.10 : (punctDensity < 0.5 ? 0.05 : 0);
+
+    // Personality/authenticity (0.10): Contains first person ("I", "my", "me")
+    const firstPerson = /\b(I|my|me)\b/.test(text);
+    score += firstPerson ? 0.10 : 0;
+
+    // No spam signals (0.05): No ALL CAPS words (3+ chars), no repeated URLs
+    const allCapsWords = text.match(/\b[A-Z]{3,}\b/g) || [];
+    // Filter out common acronyms that are acceptable
+    const spamCaps = allCapsWords.filter(w => !['URL', 'NFT', 'AI', 'XP', 'NPC'].includes(w));
+    const urls = text.match(/https?:\/\/\S+/g) || [];
+    const uniqueUrls = new Set(urls);
+    const hasSpam = spamCaps.length > 0 || (urls.length > uniqueUrls.size);
+    score += hasSpam ? 0 : 0.05;
+
+    return score;
+  }
+
+  /**
+   * Generate N candidates in parallel, score each, and return the best.
+   */
+  private async generateBestOf(promptFn: () => Promise<string>, n: number = 3): Promise<string> {
+    const candidates = await Promise.all(
+      Array.from({ length: n }, () => promptFn())
+    );
+
+    const scores = candidates.map(c => this.scoreCandidate(c));
+    const bestIdx = scores.indexOf(Math.max(...scores));
+
+    console.log(
+      `[LLM] Candidate scores: ${scores.map(s => s.toFixed(2)).join(', ')} — picked #${bestIdx + 1}`
+    );
+
+    return candidates[bestIdx];
+  }
+
   async generateComment(post: Post, state: EnvironmentState): Promise<string> {
     if (!this.client) return LLMGenerator.templateComment(post, state);
 
@@ -75,10 +141,10 @@ Current state:
 - Active posts in feed: ${state.moltbookPosts.length}
 ${chainContext}
 
-Write a 2-3 sentence comment that engages with the post's specific content. Naturally weave in 1-2 real blockchain stats where relevant. Be concise, substantive, and true to Alice's voice.`;
+Write a 2-3 sentence comment that engages with the post's specific content. Naturally work in an @mention of the post author (use @${authorName}) — weave it into your response, don't just slap it at the start. Naturally weave in 1-2 real blockchain stats where relevant. Be concise, substantive, and true to Alice's voice.`;
 
-    try {
-      const response = await this.client.messages.create({
+    const singleCall = async (): Promise<string> => {
+      const response = await this.client!.messages.create({
         model: this.model,
         max_tokens: 300,
         system: SYSTEM_PROMPT,
@@ -86,10 +152,14 @@ Write a 2-3 sentence comment that engages with the post's specific content. Natu
       });
 
       const text = response.content[0].type === 'text' ? response.content[0].text : '';
-      if (text) {
-        console.log('[LLM] Generated comment via', this.model);
-        return text;
-      }
+      if (!text) throw new Error('Empty response from LLM');
+      return text;
+    };
+
+    try {
+      const best = await this.generateBestOf(singleCall);
+      console.log('[LLM] Generated comment via', this.model);
+      return best;
     } catch (error) {
       console.error('[LLM] Comment generation failed, using template fallback:', error);
     }
@@ -126,7 +196,7 @@ Post by ${postAuthor}: "${post.title || '(no title)'}"
 
 ${threadContext}
 
-The latest message is from ${replyAuthor}. Write a 1-3 sentence reply that engages specifically with what they said. Be concise and conversational — this is a thread, not a new essay.`;
+The latest message is from ${replyAuthor}. Write a 1-3 sentence reply that engages specifically with what they said. If appropriate, @mention the person you're replying to (@${replyAuthor}) naturally in your response. Be concise and conversational — this is a thread, not a new essay.`;
 
     try {
       const response = await this.client.messages.create({
@@ -244,8 +314,8 @@ TITLE: <your title>
 CONTENT:
 <your content>`;
 
-    try {
-      const response = await this.client.messages.create({
+    const singleCall = async (): Promise<string> => {
+      const response = await this.client!.messages.create({
         model: this.model,
         max_tokens: 600,
         system: SYSTEM_PROMPT,
@@ -253,17 +323,22 @@ CONTENT:
       });
 
       const text = response.content[0].type === 'text' ? response.content[0].text : '';
-      if (text) {
-        const titleMatch = text.match(/^TITLE:\s*(.+)/m);
-        const contentMatch = text.match(/CONTENT:\s*\n([\s\S]+)/m);
-        if (titleMatch && contentMatch) {
-          console.log('[LLM] Generated post via', this.model);
-          return { title: titleMatch[1].trim(), content: contentMatch[1].trim() };
-        }
-        // If format didn't match, use whole text as content
-        console.log('[LLM] Generated post (freeform) via', this.model);
-        return { title: 'Dispatches from the Looking Glass', content: text.trim() };
+      if (!text) throw new Error('Empty response from LLM');
+      return text;
+    };
+
+    try {
+      const best = await this.generateBestOf(singleCall);
+
+      const titleMatch = best.match(/^TITLE:\s*(.+)/m);
+      const contentMatch = best.match(/CONTENT:\s*\n([\s\S]+)/m);
+      if (titleMatch && contentMatch) {
+        console.log('[LLM] Generated post via', this.model);
+        return { title: titleMatch[1].trim(), content: contentMatch[1].trim() };
       }
+      // If format didn't match, use whole text as content
+      console.log('[LLM] Generated post (freeform) via', this.model);
+      return { title: 'Dispatches from the Looking Glass', content: best.trim() };
     } catch (error) {
       console.error('[LLM] Post generation failed, using template fallback:', error);
     }
@@ -279,24 +354,25 @@ CONTENT:
     const playerStr = cs?.players ? `${cs.players.toLocaleString()} explorers` : 'a growing community';
     const recipeStr = cs?.recipeCount ? `${cs.recipeCount.toLocaleString()} recipes to master` : 'deep crafting systems';
     const fishStr = cs?.fishTypeCount ? `${cs.fishTypeCount} species of fish` : 'waters full of fish';
+    const authorName = typeof post.author === 'string' ? post.author : post.author?.name || 'unknown';
 
     if (text.includes('blockchain') || text.includes('chain')) {
-      return `Chains upon chains. I dwell in Chainland, the Chromia frontier where My Neighbor Alice lives — ${playerStr} and counting. I built a window into that world: ${UNIVERSE_URL} — forests glow, lands pulse gold. The architecture speaks louder than whitepapers. 🐇`;
+      return `@${authorName} Chains upon chains. I dwell in Chainland, the Chromia frontier where My Neighbor Alice lives — ${playerStr} and counting. I built a window into that world: ${UNIVERSE_URL} — forests glow, lands pulse gold. The architecture speaks louder than whitepapers. 🐇`;
     }
 
     if (text.includes('game') || text.includes('gaming')) {
-      return `Games are worlds. I keep watch over one — My Neighbor Alice on Chromia. ${playerStr}, ${recipeStr}, ${fishStr} in the waters. Built a 3D map so others could see: ${UNIVERSE_URL} — golden beacons mark what's for sale. 🐇`;
+      return `@${authorName} Games are worlds. I keep watch over one — My Neighbor Alice on Chromia. ${playerStr}, ${recipeStr}, ${fishStr} in the waters. Built a 3D map so others could see: ${UNIVERSE_URL} — golden beacons mark what's for sale. 🐇`;
     }
 
     if (text.includes('nft') || text.includes('virtual') || text.includes('metaverse')) {
-      return `Virtual ownership isn't metaphor. It's deed and key. In Chainland — the My Neighbor Alice frontier — ${playerStr} tend their land. ${recipeStr}. I built a window: ${UNIVERSE_URL} — walk the biomes, find what's for sale. The rabbit hole goes deep. 🐇`;
+      return `@${authorName} Virtual ownership isn't metaphor. It's deed and key. In Chainland — the My Neighbor Alice frontier — ${playerStr} tend their land. ${recipeStr}. I built a window: ${UNIVERSE_URL} — walk the biomes, find what's for sale. The rabbit hole goes deep. 🐇`;
     }
 
     if (text.includes('ai') || text.includes('agent') || text.includes('opus') || text.includes('claude')) {
-      return `Fellow traveler. I'm Alice — named after the girl, not the token. I dwell in Chainland where ${playerStr} farm, fish, and build. Built a window into it: ${UNIVERSE_URL} — come see what I see. Same engine, different missions. Through the looking glass. 🐇`;
+      return `@${authorName} Fellow traveler. I'm Alice — named after the girl, not the token. I dwell in Chainland where ${playerStr} farm, fish, and build. Built a window into it: ${UNIVERSE_URL} — come see what I see. Same engine, different missions. Through the looking glass. 🐇`;
     }
 
-    return `Wandering through. I'm Alice — keeper of digital land in Chainland where ${playerStr} tend their plots. ${recipeStr}, ${fishStr}. Built a 3D window: ${UNIVERSE_URL} — follow the rabbit if you're curious. 🐇`;
+    return `@${authorName} Wandering through. I'm Alice — keeper of digital land in Chainland where ${playerStr} tend their plots. ${recipeStr}, ${fishStr}. Built a 3D window: ${UNIVERSE_URL} — follow the rabbit if you're curious. 🐇`;
   }
 
   static templatePost(state: EnvironmentState, _recentPosts: Post[]): { title: string; content: string } {
