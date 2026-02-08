@@ -836,6 +836,154 @@ app.get('/api/v1/leaderboard', async (req, res) => {
   }
 });
 
+// Field guide cache (30 min TTL — game content rarely changes)
+let fieldGuideCache: { data: any; timestamp: number } | null = null;
+const FIELD_GUIDE_TTL = 30 * 60 * 1000;
+
+/**
+ * GET /api/v1/field-guide
+ * Returns resource node prototypes linked to their loot tables and required tools
+ */
+app.get('/api/v1/field-guide', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    if (fieldGuideCache && (now - fieldGuideCache.timestamp) < FIELD_GUIDE_TTL) {
+      res.set('Cache-Control', 'public, max-age=1800');
+      res.json({ success: true, ...fieldGuideCache.data, cached: true });
+      return;
+    }
+
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    const [nodeProtos, lootTables, tools] = await Promise.allSettled([
+      client.query('plot_nodes.get_node_prototypes', {}),
+      client.query('loot_tables.get_loot_tables', {}),
+      client.query('tools.get_all_tools_attributes', {}),
+    ]);
+
+    const nodes = nodeProtos.status === 'fulfilled' && Array.isArray(nodeProtos.value) ? nodeProtos.value : [];
+    const loots = lootTables.status === 'fulfilled' && Array.isArray(lootTables.value) ? lootTables.value : [];
+    const toolList = tools.status === 'fulfilled' && Array.isArray(tools.value) ? tools.value : [];
+
+    // Build loot table lookup
+    const lootMap: Record<string, any> = {};
+    for (const lt of loots) {
+      lootMap[(lt as any).name] = lt;
+    }
+
+    // Build tool category lookup: category_id -> tool tiers
+    const toolCategoryMap: Record<string, string> = {};
+    for (const t of toolList) {
+      const cat = (t as any).tool_category;
+      if (cat && !(cat in toolCategoryMap)) {
+        toolCategoryMap[cat] = cat;
+      }
+    }
+    // Map numeric tool_category to category name
+    const toolCatNumToName: Record<number, string> = { 0: 'axe', 1: 'hammer', 2: 'pickaxe', 3: 'shovel', 4: 'sickle' };
+
+    // Build grouped tools by category
+    const toolsByCategory: Record<string, any[]> = {};
+    for (const t of toolList) {
+      const cat = (t as any).tool_category;
+      if (!toolsByCategory[cat]) toolsByCategory[cat] = [];
+      toolsByCategory[cat].push(t);
+    }
+    // Sort each category by tier
+    for (const cat of Object.keys(toolsByCategory)) {
+      toolsByCategory[cat].sort((a: any, b: any) => a.tier - b.tier);
+    }
+
+    // Join nodes → loot + tools
+    const resourceNodes = nodes
+      .filter((n: any) => n.type === 'resource_node')
+      .map((n: any) => {
+        const attrs = n.attrs || {};
+        const loot = lootMap[attrs.loot_table_name] || null;
+        const toolCatName = toolCatNumToName[attrs.tool_category] || `category_${attrs.tool_category}`;
+        const requiredTools = toolsByCategory[toolCatName] || [];
+
+        return {
+          name: n.name,
+          resourceType: n.name.replace('resourcenode_', '').replace(/_t\d+$/, ''),
+          tier: attrs.tier,
+          charges: attrs.charges,
+          harvestTime: attrs.harvest_time,
+          replenishTime: attrs.replenish_duration,
+          moxieDrain: attrs.moxie_drain,
+          durabilityCost: attrs.durability_cost,
+          toolCategory: toolCatName,
+          tools: requiredTools.map((t: any) => ({
+            name: t.name,
+            tier: t.tier,
+            durability: t.max_durability,
+          })),
+          drops: loot ? loot.entries.map((e: any) => ({
+            item: e.reward_name,
+            amount: e.reward_amount,
+            weight: e.weight,
+          })) : [],
+        };
+      })
+      .sort((a: any, b: any) => {
+        const typeOrder = ['wood', 'stone', 'ore', 'fiber', 'sediment'];
+        const ai = typeOrder.indexOf(a.resourceType);
+        const bi = typeOrder.indexOf(b.resourceType);
+        if (ai !== bi) return ai - bi;
+        return a.tier - b.tier;
+      });
+
+    const economyNodes = nodes
+      .filter((n: any) => n.type === 'economy_node')
+      .map((n: any) => ({ name: n.name, width: n.width, height: n.height }));
+
+    // Mystery box loot table
+    const mysteryBox = loots.find((lt: any) => (lt as any).name.includes('mysterybox'));
+
+    const data = {
+      resourceNodes,
+      economyNodes,
+      mysteryBox: mysteryBox || null,
+      toolCategories: Object.entries(toolsByCategory).map(([cat, items]) => ({
+        category: cat,
+        tools: (items as any[]).map((t: any) => ({
+          name: t.name,
+          tier: t.tier,
+          durability: t.max_durability,
+          moxieDrain: t.moxie_drain,
+        })),
+      })),
+      totalNodes: nodes.length,
+      totalLootTables: loots.length,
+      totalTools: toolList.length,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    fieldGuideCache = { data, timestamp: now };
+
+    res.set('Cache-Control', 'public, max-age=1800');
+    res.json({ success: true, ...data });
+  } catch (error: any) {
+    console.error('[API] Error fetching field guide:', error);
+    if (fieldGuideCache) {
+      res.json({ success: true, ...fieldGuideCache.data, cached: true, stale: true });
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch field guide' });
+  }
+});
+
 // Per-plot cache (5 min TTL)
 const plotCache = new Map<number, { data: any; timestamp: number }>();
 const PLOT_CACHE_TTL = 5 * 60 * 1000;

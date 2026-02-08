@@ -97,6 +97,40 @@
     #stats .source span {
       color: #22c55e;
     }
+    /* Draggable + Collapsible Panel System */
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      cursor: grab;
+      user-select: none;
+      margin: -15px -20px 10px -20px;
+      padding: 10px 15px;
+      border-radius: 12px 12px 0 0;
+      background: rgba(255,255,255,0.03);
+    }
+    .panel-header:active { cursor: grabbing; }
+    .panel-header h3 { margin: 0; }
+    .panel-collapse-btn {
+      width: 22px;
+      height: 22px;
+      border: none;
+      background: rgba(255,255,255,0.08);
+      color: #888;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 14px;
+      line-height: 22px;
+      text-align: center;
+      transition: all 0.15s;
+      flex-shrink: 0;
+    }
+    .panel-collapse-btn:hover { background: rgba(255,255,255,0.15); color: #fff; }
+    .panel-body { transition: none; }
+    .panel-collapsed .panel-body { display: none !important; }
+    .panel-collapsed .panel-header { margin-bottom: -15px; border-radius: 12px; }
+    .panel-dragging { opacity: 0.85; z-index: 1000 !important; }
+
     #legend {
       position: absolute;
       bottom: 10px;
@@ -127,6 +161,137 @@
       border-radius: 4px;
       box-shadow: 0 2px 4px rgba(0,0,0,0.3);
     }
+    /* Field Guide */
+    #field-guide {
+      position: absolute;
+      bottom: 170px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 15px 20px;
+      border-radius: 12px;
+      z-index: 100;
+      border: 1px solid rgba(251, 146, 60, 0.3);
+      backdrop-filter: blur(10px);
+      min-width: 280px;
+      max-width: 320px;
+      max-height: 55vh;
+      overflow-y: auto;
+    }
+    #field-guide h3 {
+      color: #fb923c;
+      font-size: 14px;
+      margin-bottom: 0;
+      cursor: pointer;
+      user-select: none;
+    }
+    #field-guide h3:hover { color: #fdba74; }
+    #fg-arrow {
+      font-size: 10px;
+      margin-left: 6px;
+      transition: transform 0.2s;
+      display: inline-block;
+    }
+    #fg-arrow.open { transform: rotate(90deg); }
+    #fg-tabs {
+      display: flex;
+      gap: 4px;
+      margin: 10px 0 8px;
+    }
+    .fg-tab {
+      padding: 4px 10px;
+      font-size: 11px;
+      border-radius: 6px;
+      background: rgba(255,255,255,0.05);
+      cursor: pointer;
+      color: #aaa;
+      transition: all 0.15s;
+    }
+    .fg-tab:hover { background: rgba(255,255,255,0.1); color: #fff; }
+    .fg-tab.active { background: rgba(251,146,60,0.2); color: #fb923c; }
+    .fg-panel { font-size: 12px; }
+    .fg-node {
+      margin: 8px 0;
+      padding: 8px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 8px;
+      border-left: 3px solid rgba(251,146,60,0.4);
+    }
+    .fg-node-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 4px;
+    }
+    .fg-node-name {
+      font-weight: bold;
+      color: #fdba74;
+      text-transform: capitalize;
+    }
+    .fg-tier {
+      font-size: 10px;
+      padding: 1px 6px;
+      border-radius: 4px;
+      background: rgba(251,146,60,0.15);
+      color: #fb923c;
+    }
+    .fg-stats {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 2px 12px;
+      font-size: 11px;
+      color: #999;
+      margin: 4px 0;
+    }
+    .fg-stats span { color: #ddd; }
+    .fg-drops {
+      margin-top: 4px;
+      font-size: 11px;
+    }
+    .fg-drop-item {
+      color: #a5f3fc;
+      display: inline-block;
+      margin-right: 6px;
+    }
+    .fg-drop-amount { color: #666; font-size: 10px; }
+    .fg-tool-req {
+      font-size: 11px;
+      color: #888;
+      margin-top: 3px;
+    }
+    .fg-tool-req span { color: #c4b5fd; }
+    .fg-tool-card {
+      margin: 6px 0;
+      padding: 6px 8px;
+      background: rgba(255,255,255,0.03);
+      border-radius: 6px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+    .fg-tool-name {
+      color: #c4b5fd;
+      text-transform: capitalize;
+      font-size: 12px;
+    }
+    .fg-tool-tiers {
+      display: flex;
+      gap: 6px;
+      font-size: 11px;
+    }
+    .fg-tool-tier { color: #999; }
+    .fg-tool-tier span { color: #ddd; }
+    .fg-seed {
+      display: inline-block;
+      margin: 3px 4px;
+      padding: 3px 8px;
+      background: rgba(74, 222, 128, 0.1);
+      border-radius: 4px;
+      color: #4ade80;
+      font-size: 11px;
+      text-transform: capitalize;
+    }
+
     #land-info {
       position: absolute;
       bottom: 10px;
@@ -587,8 +752,9 @@
     <p class="highlight pulse">Golden glowing lands are FOR SALE!</p>
   </div>
 
-  <div id="stats">
-    <h3>World Statistics</h3>
+  <div id="stats" class="draggable-panel">
+    <div class="panel-header"><h3>World Statistics</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <div class="stat">
       <span>Total Lands:</span>
       <span class="stat-value" id="total-lands">0</span>
@@ -608,11 +774,13 @@
     <div class="source">
       Data: <span id="data-source">loading...</span>
     </div>
+    </div>
   </div>
 
 
-  <div id="chain-stats">
-    <h3>Chromia Blockchain</h3>
+  <div id="chain-stats" class="draggable-panel">
+    <div class="panel-header"><h3>Chromia Blockchain</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <div class="stat">
       <span>Total Players:</span>
       <span class="stat-value" id="chain-players">--</span>
@@ -654,23 +822,29 @@
     <div class="source">
       Source: <span id="chain-source">loading...</span>
     </div>
+    </div>
   </div>
 
-  <div id="player-search">
-    <h3>Player Lookup</h3>
+  <div id="player-search" class="draggable-panel">
+    <div class="panel-header"><h3>Player Lookup</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <input type="text" id="search-input" placeholder="Search player..." />
     <div id="search-result" style="display:none;"></div>
     <div id="search-error" style="display:none;"></div>
+    </div>
   </div>
 
-  <div id="storefront">
-    <h3>P2P Marketplace</h3>
+  <div id="storefront" class="draggable-panel">
+    <div class="panel-header"><h3>P2P Marketplace</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <div id="storefront-list">Loading...</div>
     <div class="source">Source: <span id="sf-source">loading...</span></div>
+    </div>
   </div>
 
-  <div id="leaderboard">
-    <h3>Top Players (XP)</h3>
+  <div id="leaderboard" class="draggable-panel">
+    <div class="panel-header"><h3>Top Players (XP)</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <div id="leaderboard-list"></div>
     <div class="whale-section">
       <div id="whale-list"></div>
@@ -678,10 +852,12 @@
     <div class="source">
       Source: <span id="lb-source">loading...</span>
     </div>
+    </div>
   </div>
 
-  <div id="legend">
-    <h3>Regions / Biomes</h3>
+  <div id="legend" class="draggable-panel">
+    <div class="panel-header"><h3>Regions / Biomes</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <div class="legend-item">
       <div class="legend-color" style="background: linear-gradient(135deg, #4ade80, #22c55e);"></div>
       <span>Plains / Wolds</span>
@@ -698,9 +874,29 @@
       <div class="legend-color" style="background: linear-gradient(135deg, #38bdf8, #0ea5e9);"></div>
       <span>Water / Falls</span>
     </div>
+    </div>
   </div>
 
-  <div id="land-info">
+  <div id="field-guide" class="draggable-panel">
+    <div class="panel-header"><h3 id="field-guide-toggle" style="cursor:pointer;">Field Guide <span id="fg-arrow">&#9654;</span></h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
+    <div id="fg-content" style="display:none;">
+      <div id="fg-tabs">
+        <span class="fg-tab active" data-tab="nodes">Resources</span>
+        <span class="fg-tab" data-tab="tools">Tools</span>
+        <span class="fg-tab" data-tab="mystery">Seeds</span>
+      </div>
+      <div id="fg-panel-nodes" class="fg-panel"></div>
+      <div id="fg-panel-tools" class="fg-panel" style="display:none;"></div>
+      <div id="fg-panel-mystery" class="fg-panel" style="display:none;"></div>
+      <div class="source">Source: <span id="fg-source">loading...</span></div>
+    </div>
+    </div>
+  </div>
+
+  <div id="land-info" class="draggable-panel">
+    <div class="panel-header"><h3 style="font-size:16px;">Land Details</h3><button class="panel-collapse-btn" title="Minimize">−</button></div>
+    <div class="panel-body">
     <h2 id="land-name">Land Name</h2>
     <div class="plot-id" id="plot-id">Plot #0000000</div>
     <div class="detail">
@@ -754,6 +950,7 @@
         <div class="section-title">🗺️ Map Data</div>
         <div class="dd-content" id="plot-map">Loading...</div>
       </div>
+    </div>
     </div>
   </div>
 
@@ -1268,7 +1465,7 @@
 
     function onMouseClick(event) {
       // Ignore clicks on UI panels
-      if (event.target.closest('#land-info') || event.target.closest('#player-search') || event.target.closest('#storefront')) return;
+      if (event.target.closest('.draggable-panel') || event.target.closest('#land-info') || event.target.closest('#info') || event.target.closest('#stats')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -1333,7 +1530,7 @@
 
     // Double-click to zoom + show deep-dive details
     window.addEventListener('dblclick', (event) => {
-      if (event.target.closest('#land-info') || event.target.closest('#player-search') || event.target.closest('#storefront')) return;
+      if (event.target.closest('.draggable-panel') || event.target.closest('#land-info') || event.target.closest('#info') || event.target.closest('#stats')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -1710,6 +1907,118 @@
       }
     }
 
+    // Field Guide
+    const fgToggle = document.getElementById('field-guide-toggle');
+    const fgContent = document.getElementById('fg-content');
+    const fgArrow = document.getElementById('fg-arrow');
+    let fieldGuideLoaded = false;
+
+    fgToggle.addEventListener('click', () => {
+      const isOpen = fgContent.style.display !== 'none';
+      fgContent.style.display = isOpen ? 'none' : 'block';
+      fgArrow.classList.toggle('open', !isOpen);
+      if (!fieldGuideLoaded) {
+        fieldGuideLoaded = true;
+        loadFieldGuide();
+      }
+    });
+
+    // Tab switching
+    document.getElementById('fg-tabs').addEventListener('click', (e) => {
+      const tab = e.target.closest('.fg-tab');
+      if (!tab) return;
+      const tabName = tab.dataset.tab;
+      document.querySelectorAll('.fg-tab').forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      document.querySelectorAll('.fg-panel').forEach(p => p.style.display = 'none');
+      document.getElementById('fg-panel-' + tabName).style.display = 'block';
+    });
+
+    function formatTime(ms) {
+      if (ms >= 3600000) return (ms / 3600000).toFixed(1) + 'h';
+      if (ms >= 60000) return (ms / 60000).toFixed(0) + 'm';
+      return (ms / 1000).toFixed(0) + 's';
+    }
+
+    async function loadFieldGuide() {
+      try {
+        const response = await fetch('/api/v1/field-guide');
+        const r = await response.json();
+        if (!r.success) {
+          document.getElementById('fg-source').textContent = 'Offline';
+          return;
+        }
+
+        // Render resource nodes
+        const nodesEl = document.getElementById('fg-panel-nodes');
+        let currentType = '';
+        let nodesHtml = '';
+        for (const node of r.resourceNodes) {
+          if (node.resourceType !== currentType) {
+            currentType = node.resourceType;
+            const emoji = { wood: '🪵', stone: '🪨', ore: '⛏️', fiber: '🌿', sediment: '🏖️' }[currentType] || '📦';
+            nodesHtml += `<div style="color:#fb923c;font-size:13px;font-weight:bold;margin:${nodesHtml ? '12px' : '0'} 0 4px;text-transform:capitalize;">${emoji} ${currentType}</div>`;
+          }
+          const dropList = node.drops.map(d => {
+            const name = d.item.replace('resource_raw_', '').replace(/_/g, ' ');
+            return `<span class="fg-drop-item">${name}${d.amount > 1 ? ` <span class="fg-drop-amount">x${d.amount}</span>` : ''}</span>`;
+          }).join('');
+
+          nodesHtml += `
+            <div class="fg-node">
+              <div class="fg-node-header">
+                <span class="fg-node-name">${node.name.replace('resourcenode_', '').replace(/_/g, ' ')}</span>
+                <span class="fg-tier">T${node.tier}</span>
+              </div>
+              <div class="fg-stats">
+                <div>Charges: <span>${node.charges}</span></div>
+                <div>Harvest: <span>${formatTime(node.harvestTime)}</span></div>
+                <div>Respawn: <span>${formatTime(node.replenishTime)}</span></div>
+                <div>Moxie: <span>${node.moxieDrain}</span></div>
+              </div>
+              <div class="fg-drops">Drops: ${dropList}</div>
+              <div class="fg-tool-req">Tool: <span>${node.toolCategory}</span> (durability cost: ${node.durabilityCost})</div>
+            </div>`;
+        }
+        nodesEl.innerHTML = nodesHtml;
+
+        // Render tools
+        const toolsEl = document.getElementById('fg-panel-tools');
+        let toolsHtml = '';
+        const toolEmoji = { axe: '🪓', hammer: '🔨', pickaxe: '⛏️', shovel: '🪣', sickle: '🌾', rod: '🎣', hoe: '🌱', planter: '🌻', watering_can: '💧', scythe: '🗡️', flute: '🎵' };
+        for (const cat of r.toolCategories) {
+          const emoji = toolEmoji[cat.category] || '🔧';
+          toolsHtml += `<div class="fg-tool-card">
+            <span class="fg-tool-name">${emoji} ${cat.category.replace(/_/g, ' ')}</span>
+            <span class="fg-tool-tiers">${cat.tools.map(t =>
+              `<span class="fg-tool-tier">T${t.tier}: <span>${t.durability}</span></span>`
+            ).join('')}</span>
+          </div>`;
+        }
+        toolsEl.innerHTML = toolsHtml || 'No tool data';
+
+        // Render mystery box seeds
+        const mysteryEl = document.getElementById('fg-panel-mystery');
+        if (r.mysteryBox && r.mysteryBox.entries) {
+          const totalWeight = r.mysteryBox.entries.reduce((s, e) => s + Math.max(e.weight, 0), 0);
+          let seedHtml = `<div style="color:#4ade80;font-size:12px;margin-bottom:8px;">🎁 Mysterious Seeds Box — ${r.mysteryBox.entries.length} possible drops</div>`;
+          for (const entry of r.mysteryBox.entries) {
+            const name = entry.item.replace('seed_', '').replace(/_/g, ' ');
+            const pct = totalWeight > 0 ? ((Math.max(entry.weight, 0) / totalWeight) * 100).toFixed(0) : '?';
+            seedHtml += `<span class="fg-seed">${name} <span style="color:#888;font-size:10px;">${pct}%</span></span>`;
+          }
+          mysteryEl.innerHTML = seedHtml;
+        } else {
+          mysteryEl.textContent = 'No mystery box data';
+        }
+
+        document.getElementById('fg-source').textContent = `Chromia (${r.totalNodes} nodes, ${r.totalTools} tools)`;
+      } catch (error) {
+        console.warn('Failed to load field guide:', error);
+        document.getElementById('fg-source').textContent = 'Offline';
+      }
+    }
+
     // Initialize
     loadLands();
     loadChainStats();
@@ -1722,6 +2031,66 @@
     setTimeout(positionStorefront, 500);
     window.addEventListener('resize', positionStorefront);
     animate();
+
+    // === Draggable + Collapsible Panel System ===
+    document.querySelectorAll('.draggable-panel').forEach(panel => {
+      const header = panel.querySelector('.panel-header');
+      const collapseBtn = panel.querySelector('.panel-collapse-btn');
+      if (!header) return;
+
+      // Collapse/expand on button click
+      if (collapseBtn) {
+        collapseBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          const collapsed = panel.classList.toggle('panel-collapsed');
+          collapseBtn.textContent = collapsed ? '+' : '−';
+          collapseBtn.title = collapsed ? 'Expand' : 'Minimize';
+        });
+      }
+
+      // Drag on header
+      let isDragging = false;
+      let dragStartX, dragStartY, panelStartX, panelStartY;
+
+      header.addEventListener('mousedown', (e) => {
+        // Don't drag if clicking the collapse button or an input
+        if (e.target.closest('.panel-collapse-btn') || e.target.tagName === 'INPUT') return;
+
+        isDragging = true;
+        panel.classList.add('panel-dragging');
+
+        // Get current position (handle both positioned and auto-positioned panels)
+        const rect = panel.getBoundingClientRect();
+        dragStartX = e.clientX;
+        dragStartY = e.clientY;
+        panelStartX = rect.left;
+        panelStartY = rect.top;
+
+        // Switch from CSS positioning to absolute pixel positioning
+        panel.style.left = rect.left + 'px';
+        panel.style.top = rect.top + 'px';
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+
+        e.preventDefault();
+      });
+
+      document.addEventListener('mousemove', (e) => {
+        if (!isDragging) return;
+        const dx = e.clientX - dragStartX;
+        const dy = e.clientY - dragStartY;
+        panel.style.left = (panelStartX + dx) + 'px';
+        panel.style.top = (panelStartY + dy) + 'px';
+      });
+
+      document.addEventListener('mouseup', () => {
+        if (isDragging) {
+          isDragging = false;
+          panel.classList.remove('panel-dragging');
+        }
+      });
+    });
+
   </script>
 </body>
 </html>
