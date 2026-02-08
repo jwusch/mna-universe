@@ -731,8 +731,13 @@
       <button class="action-btn zoom-btn" id="zoom-btn">🔍 Zoom</button>
       <a class="action-btn map-btn" id="map-btn" href="#" target="_blank">🗺️ MNA Map</a>
     </div>
+    <div id="dblclick-hint" style="text-align:center; color:#666; font-size:11px; margin-top:8px; font-style:italic;">Double-click tile for deep dive</div>
     <div id="plot-deep-dive" style="display:none;">
       <div class="section-divider"></div>
+      <div class="deep-dive-section">
+        <div class="section-title">📋 Plot Info</div>
+        <div class="dd-content" id="plot-meta">Loading...</div>
+      </div>
       <div class="deep-dive-section">
         <div class="section-title">🌾 Farming</div>
         <div class="dd-content" id="plot-farming">Loading...</div>
@@ -744,6 +749,10 @@
       <div class="deep-dive-section">
         <div class="section-title">⛏️ Resources</div>
         <div class="dd-content" id="plot-nodes">Loading...</div>
+      </div>
+      <div class="deep-dive-section">
+        <div class="section-title">🗺️ Map Data</div>
+        <div class="dd-content" id="plot-map">Loading...</div>
       </div>
     </div>
   </div>
@@ -1307,59 +1316,14 @@
           mapBtn.title = `View Plot #${plotId} on MNA in-game map`;
 
           document.getElementById('land-info').style.display = 'block';
+          document.getElementById('plot-deep-dive').style.display = 'none';
+          document.getElementById('dblclick-hint').style.display = 'block';
           console.log('Selected land:', land);
-
-          // Deep dive: fetch plot details
-          const deepDive = document.getElementById('plot-deep-dive');
-          deepDive.style.display = 'block';
-          document.getElementById('plot-farming').textContent = 'Loading...';
-          document.getElementById('plot-fishing').textContent = 'Loading...';
-          document.getElementById('plot-nodes').textContent = 'Loading...';
-
-          fetch(`/api/v1/plots/${plotId}`)
-            .then(r => r.json())
-            .then(data => {
-              if (!data.success) { deepDive.style.display = 'none'; return; }
-
-              // Farming
-              if (data.farming && data.farming.length > 0) {
-                const mature = data.farming.filter(f => f.current_state === 'mature').length;
-                const growing = data.farming.filter(f => f.plant && f.current_state !== 'mature').length;
-                const plantNames = [...new Set(data.farming.filter(f => f.plant).map(f => f.plant.name.replace('seed_', '').replace(/_/g, ' ')))];
-                document.getElementById('plot-farming').innerHTML =
-                  `${mature} mature, ${growing} growing<br><small style="color:#888">${plantNames.slice(0,3).join(', ')}</small>`;
-              } else {
-                document.getElementById('plot-farming').textContent = 'No crops planted';
-              }
-
-              // Fishing
-              if (data.fishing && data.fishing.length > 0) {
-                const names = data.fishing.map(f => f.name.replace('fish_', '').replace(/_/g, ' '));
-                document.getElementById('plot-fishing').innerHTML =
-                  `${names.length} species<br><small style="color:#888">${names.slice(0,4).join(', ')}</small>`;
-              } else {
-                document.getElementById('plot-fishing').textContent = 'No fish data';
-              }
-
-              // Resource nodes
-              if (data.nodes && data.nodes.length > 0) {
-                const groups = {};
-                data.nodes.forEach(n => {
-                  const type = n.node_prototype_name.replace('resourcenode_', '').replace(/_t\d+/, '');
-                  groups[type] = (groups[type] || 0) + 1;
-                });
-                const summary = Object.entries(groups).map(([k,v]) => `${v} ${k}`).join(', ');
-                document.getElementById('plot-nodes').innerHTML =
-                  `${data.nodes.length} nodes<br><small style="color:#888">${summary}</small>`;
-              } else {
-                document.getElementById('plot-nodes').textContent = 'No resource nodes';
-              }
-            })
-            .catch(() => { deepDive.style.display = 'none'; });
         }
       } else {
         document.getElementById('land-info').style.display = 'none';
         document.getElementById('plot-deep-dive').style.display = 'none';
+        document.getElementById('dblclick-hint').style.display = 'none';
         selectedMesh = null;
         selectedLand = null;
       }
@@ -1367,7 +1331,7 @@
 
     window.addEventListener('click', onMouseClick, false);
 
-    // Double-click to zoom into a land tile
+    // Double-click to zoom + show deep-dive details
     window.addEventListener('dblclick', (event) => {
       if (event.target.closest('#land-info') || event.target.closest('#player-search') || event.target.closest('#storefront')) return;
 
@@ -1380,7 +1344,114 @@
       if (intersects.length > 0) {
         const landId = intersects[0].object.userData.landId;
         const land = landDataMap.get(landId);
-        if (land) zoomToLand(land);
+        if (!land) return;
+
+        // Zoom camera to tile
+        zoomToLand(land);
+
+        // Select the tile if not already selected
+        if (selectedMesh) selectedMesh.material.emissive.setHex(0x000000);
+        selectedMesh = intersects[0].object;
+        selectedLand = land;
+        selectedMesh.material.emissive.setHex(0x333333);
+
+        const plotId = land.plotId || land.id;
+
+        // Show info panel
+        document.getElementById('land-name').textContent = land.name;
+        document.getElementById('plot-id').textContent = `Plot #${plotId}`;
+        document.getElementById('land-island').textContent = land.island || 'Unknown';
+        document.getElementById('land-region').textContent = land.region || 'Unknown';
+        document.getElementById('land-coords').textContent = `(${land.realX || land.x}, ${land.realY || land.y})`;
+        document.getElementById('land-biome').textContent = (land.biome || 'plains').charAt(0).toUpperCase() + (land.biome || 'plains').slice(1);
+        document.getElementById('land-soil').textContent = `Soil: ${land.soilType || 'unknown'}`;
+        document.getElementById('land-water').textContent = `Water: ${land.waterType || 'unknown'}`;
+        document.getElementById('land-info').style.display = 'block';
+
+        // Hide hint, show deep dive loading
+        document.getElementById('dblclick-hint').style.display = 'none';
+        const deepDive = document.getElementById('plot-deep-dive');
+        deepDive.style.display = 'block';
+        document.getElementById('plot-meta').textContent = 'Loading...';
+        document.getElementById('plot-farming').textContent = 'Loading...';
+        document.getElementById('plot-fishing').textContent = 'Loading...';
+        document.getElementById('plot-nodes').textContent = 'Loading...';
+        document.getElementById('plot-map').textContent = 'Loading...';
+
+        // Fetch deep-dive data from Chromia
+        fetch(`/api/v1/plots/${plotId}`)
+          .then(r => r.json())
+          .then(data => {
+            if (!data.success) { deepDive.style.display = 'none'; return; }
+
+            // Plot metadata
+            if (data.meta) {
+              const m = data.meta;
+              const parts = [];
+              if (m.owner_name) parts.push(`Owner: ${m.owner_name}`);
+              if (m.plot_name) parts.push(`Name: ${m.plot_name}`);
+              if (m.region_name) parts.push(`Region: ${m.region_name}`);
+              if (m.biome) parts.push(`Biome: ${m.biome}`);
+              if (m.level != null) parts.push(`Level: ${m.level}`);
+              document.getElementById('plot-meta').innerHTML = parts.length > 0
+                ? parts.map(p => `<div>${p}</div>`).join('')
+                : 'No metadata available';
+            } else {
+              document.getElementById('plot-meta').textContent = 'No metadata available';
+            }
+
+            // Farming
+            if (data.farming && data.farming.length > 0) {
+              const mature = data.farming.filter(f => f.current_state === 'mature').length;
+              const growing = data.farming.filter(f => f.plant && f.current_state !== 'mature').length;
+              const empty = data.farming.filter(f => !f.plant).length;
+              const plantNames = [...new Set(data.farming.filter(f => f.plant).map(f => f.plant.name.replace('seed_', '').replace(/_/g, ' ')))];
+              let html = `${data.farming.length} plots: ${mature} mature, ${growing} growing, ${empty} empty`;
+              if (plantNames.length > 0) html += `<br><small style="color:#888">Growing: ${plantNames.join(', ')}</small>`;
+              document.getElementById('plot-farming').innerHTML = html;
+            } else {
+              document.getElementById('plot-farming').textContent = 'No crops planted';
+            }
+
+            // Fishing
+            if (data.fishing && data.fishing.length > 0) {
+              const names = data.fishing.map(f => f.name.replace('fish_', '').replace(/_/g, ' '));
+              document.getElementById('plot-fishing').innerHTML =
+                `${names.length} species available<br><small style="color:#888">${names.join(', ')}</small>`;
+            } else {
+              document.getElementById('plot-fishing').textContent = 'No fish data';
+            }
+
+            // Resource nodes
+            if (data.nodes && data.nodes.length > 0) {
+              const groups = {};
+              data.nodes.forEach(n => {
+                const type = n.node_prototype_name.replace('resourcenode_', '').replace(/_t\d+/, '').replace(/_/g, ' ');
+                groups[type] = (groups[type] || 0) + 1;
+              });
+              const summary = Object.entries(groups).map(([k,v]) => `${v}x ${k}`).join(', ');
+              document.getElementById('plot-nodes').innerHTML =
+                `${data.nodes.length} resource nodes<br><small style="color:#888">${summary}</small>`;
+            } else {
+              document.getElementById('plot-nodes').textContent = 'No resource nodes';
+            }
+
+            // Map data
+            if (data.map) {
+              const mapData = Array.isArray(data.map) ? data.map : [data.map];
+              const tileTypes = {};
+              mapData.forEach(t => {
+                const type = t.tile_type || t.type || 'unknown';
+                tileTypes[type] = (tileTypes[type] || 0) + 1;
+              });
+              const summary = Object.entries(tileTypes).map(([k,v]) => `${v}x ${k.replace(/_/g, ' ')}`).join(', ');
+              document.getElementById('plot-map').innerHTML =
+                `${mapData.length} tiles<br><small style="color:#888">${summary}</small>`;
+            } else {
+              document.getElementById('plot-map').textContent = 'No map data';
+            }
+          })
+          .catch(() => { deepDive.style.display = 'none'; });
       }
     }, false);
 
