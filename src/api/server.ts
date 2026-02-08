@@ -527,8 +527,8 @@ app.listen(PORT, () => {
     console.log(`[API] Pre-loaded ${lands.length} real lands from MNA Marketplace`);
   });
 
-  // Start Moltbook heartbeat agent if API key is configured
-  if (process.env.MOLTBOOK_API_KEY) {
+  // Start Moltbook heartbeat agent if explicitly enabled and API key is configured
+  if (process.env.ENABLE_HEARTBEAT === 'true' && process.env.MOLTBOOK_API_KEY) {
     const agent = new AliceMoltbookAgent({
       moltbook: {
         apiKey: process.env.MOLTBOOK_API_KEY,
@@ -555,6 +555,6 @@ app.listen(PORT, () => {
     );
     console.log('[Moltbook] Heartbeat scheduled every 30 minutes');
   } else {
-    console.log('[Moltbook] No MOLTBOOK_API_KEY set, heartbeat agent disabled');
+    console.log('[Moltbook] Heartbeat agent disabled (set ENABLE_HEARTBEAT=true to enable)');
   }
 });

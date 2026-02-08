@@ -13,14 +13,26 @@ export interface RegisterResponse {
   agent_id: string;
 }
 
+export interface Comment {
+  id: string;
+  content: string;
+  parent_id: string | null;
+  author: { id: string; name: string; karma?: number };
+  created_at: string;
+  upvotes: number;
+  downvotes: number;
+  replies: Comment[];
+}
+
 export interface Post {
   id: string;
   title: string;
   content: string;
-  author: string | { name: string };
+  author: string | { name: string; id?: string };
   submolt: string;
   upvotes: number;
   created_at: string;
+  comments?: Comment[];
 }
 
 export interface AgentStatus {
@@ -111,6 +123,30 @@ export class MoltbookClient {
   }
 
   /**
+   * Get a single post by ID (includes comments)
+   */
+  async getPost(postId: string): Promise<{ post: Post; comments: Comment[] }> {
+    const response = await this.client.get(`/posts/${postId}`);
+    return { post: response.data.post, comments: response.data.comments || [] };
+  }
+
+  /**
+   * Reply to a comment on a post (handles verification if required)
+   */
+  async createReply(postId: string, parentId: string, content: string): Promise<any> {
+    const response = await this.client.post(`/posts/${postId}/comments`, { content, parent_id: parentId });
+
+    if (response.data.verification_required && response.data.verification) {
+      console.log('[Moltbook] Verification required, solving challenge...');
+      const answer = this.solveChallenge(response.data.verification.challenge);
+      await this.verify(response.data.verification.code, answer);
+      console.log('[Moltbook] Reply verified and published');
+    }
+
+    return response.data;
+  }
+
+  /**
    * Comment on a post (handles verification if required)
    * Rate limit: 1 comment per 20 seconds, 50 per day
    */
@@ -141,141 +177,107 @@ export class MoltbookClient {
 
   /**
    * Solve Moltbook's verification challenge (lobster math problems)
+   *
+   * Strategy: compress text by removing ALL spaces and non-alpha chars,
+   * then dedup consecutive letters, then find number words in the stream.
+   * This defeats obfuscation like "twen ty three" or "twenty f iv e".
    */
   private solveChallenge(challenge: string): string {
-    // Step 1: Lowercase and remove non-alpha except spaces
-    let cleaned = challenge.toLowerCase().replace(/[^a-z\s]/g, ' ');
+    console.log('[Moltbook] Raw challenge:', challenge);
 
-    // Step 2: Remove repeated consecutive letters (e.g., "thirrty" -> "thirty")
-    // But preserve valid doubles like "ee" in "teen", "ll" in "all"
-    cleaned = cleaned.replace(/(.)\1+/g, '$1');
+    // Step 1: Extract any digit numbers from the original text
+    const digitMatches = challenge.match(/\d+(?:\.\d+)?/g);
+    const digitNumbers = digitMatches ? digitMatches.map(Number) : [];
 
-    // Step 3: Remove spaces within words by joining common patterns
-    // This handles "tw en ty" -> "twenty", "fo ur" -> "four"
-    const joinPatterns: [RegExp, string][] = [
-      // Tens
-      [/tw\s*e\s*n\s*t\s*y/g, 'twenty'],
-      [/th\s*i\s*r\s*t\s*y/g, 'thirty'],
-      [/f\s*o\s*r\s*t\s*y/g, 'forty'],
-      [/f\s*i\s*f\s*t\s*y/g, 'fifty'],
-      [/s\s*i\s*x\s*t\s*y/g, 'sixty'],
-      [/s\s*e\s*v\s*e\s*n\s*t\s*y/g, 'seventy'],
-      [/e\s*i\s*g\s*h\s*t\s*y/g, 'eighty'],
-      [/n\s*i\s*n\s*e\s*t\s*y/g, 'ninety'],
-      // Teens
-      [/th\s*i\s*r\s*t\s*e\s*n/g, 'thirteen'],
-      [/f\s*o\s*u\s*r\s*t\s*e\s*n/g, 'fourteen'],
-      [/f\s*i\s*f\s*t\s*e\s*n/g, 'fifteen'],
-      [/s\s*i\s*x\s*t\s*e\s*n/g, 'sixteen'],
-      [/s\s*e\s*v\s*e\s*n\s*t\s*e\s*n/g, 'seventeen'],
-      [/e\s*i\s*g\s*h\s*t\s*e\s*n/g, 'eighteen'],
-      [/n\s*i\s*n\s*e\s*t\s*e\s*n/g, 'nineteen'],
-      [/e\s*l\s*e\s*v\s*e\s*n/g, 'eleven'],
-      [/t\s*w\s*e\s*l\s*v\s*e/g, 'twelve'],
-      // Single digits
-      [/z\s*e\s*r\s*o/g, 'zero'],
-      [/\bo\s*n\s*e\b/g, 'one'],
-      [/\bt\s*w\s*o\b/g, 'two'],
-      [/th\s*r\s*e/g, 'three'],
-      [/f\s*o\s*u\s*r/g, 'four'],
-      [/f\s*i\s*v\s*e/g, 'five'],
-      [/\bs\s*i\s*x\b/g, 'six'],
-      [/s\s*e\s*v\s*e\s*n/g, 'seven'],
-      [/e\s*i\s*g\s*h\s*t/g, 'eight'],
-      [/n\s*i\s*n\s*e/g, 'nine'],
-      [/\bt\s*e\s*n\b/g, 'ten'],
-      // Operation keywords
-      [/g\s*a\s*i\s*n\s*s/g, 'gains'],
-      [/l\s*o\s*s\s*e\s*s/g, 'loses'],
-      [/s\s*l\s*o\s*w\s*s/g, 'slows'],
-      [/t\s*o\s*t\s*a\s*l/g, 'total'],
-      [/s\s*p\s*e\s*d/g, 'speed'],
+    // Step 2: Prepare text for operation detection (keep spaces for word context)
+    const spacedText = challenge.toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim();
+
+    // Step 3: Compress text for number extraction
+    // Remove ALL non-alpha chars (including spaces), then dedup consecutive chars
+    let compressed = challenge.toLowerCase().replace(/[^a-z]/g, '').replace(/(.)\1+/g, '$1');
+
+    console.log('[Moltbook] Compressed:', compressed);
+
+    // Step 4: Build number lookup tables
+    // After dedup: "three"→"thre", "fifteen"→"fiften", "thirteen"→"thirten", etc.
+    const tens: [string, number][] = [
+      ['twenty', 20], ['thirty', 30], ['forty', 40], ['fifty', 50],
+      ['sixty', 60], ['seventy', 70], ['eighty', 80], ['ninety', 90],
+    ];
+    const ones: [string, number][] = [
+      ['one', 1], ['two', 2], ['thre', 3], ['four', 4], ['five', 5],
+      ['six', 6], ['seven', 7], ['eight', 8], ['nine', 9],
     ];
 
-    for (const [pattern, replacement] of joinPatterns) {
-      cleaned = cleaned.replace(pattern, replacement);
+    // Generate compound numbers (e.g. "twentythre" = 23)
+    const compounds: [string, number][] = [];
+    for (const [tenWord, tenVal] of tens) {
+      for (const [oneWord, oneVal] of ones) {
+        compounds.push([tenWord + oneWord, tenVal + oneVal]);
+      }
     }
+    // Sort by length descending so longer matches take priority
+    compounds.sort((a, b) => b[0].length - a[0].length);
 
-    // Clean up multiple spaces
-    cleaned = cleaned.replace(/\s+/g, ' ').trim();
-
-    console.log('[Moltbook] Challenge:', cleaned);
-
-    // Compound number patterns (check these FIRST - longer matches)
-    const compoundNumbers: [RegExp, number][] = [
-      [/twenty\s*three/g, 23], [/twenty\s*four/g, 24], [/twenty\s*five/g, 25],
-      [/twenty\s*six/g, 26], [/twenty\s*seven/g, 27], [/twenty\s*eight/g, 28],
-      [/twenty\s*nine/g, 29], [/twenty\s*one/g, 21], [/twenty\s*two/g, 22],
-      [/thirty\s*one/g, 31], [/thirty\s*two/g, 32], [/thirty\s*three/g, 33],
-      [/thirty\s*four/g, 34], [/thirty\s*five/g, 35], [/thirty\s*six/g, 36],
-      [/thirty\s*seven/g, 37], [/thirty\s*eight/g, 38], [/thirty\s*nine/g, 39],
-      [/forty\s*one/g, 41], [/forty\s*two/g, 42], [/forty\s*three/g, 43],
-      [/forty\s*four/g, 44], [/forty\s*five/g, 45], [/forty\s*six/g, 46],
-      [/forty\s*seven/g, 47], [/forty\s*eight/g, 48], [/forty\s*nine/g, 49],
-      [/fifty\s*one/g, 51], [/fifty\s*two/g, 52], [/fifty\s*three/g, 53],
+    // Simple numbers: teens (deduped forms), tens, and single digits
+    const simples: [string, number][] = [
+      ['nineten', 19], ['eighten', 18], ['seventen', 17], ['sixten', 16],
+      ['fiften', 15], ['fourten', 14], ['thirten', 13], ['twelve', 12],
+      ['eleven', 11],
+      ...tens,
+      ['ten', 10], ['nine', 9], ['eight', 8], ['seven', 7], ['six', 6],
+      ['five', 5], ['four', 4], ['thre', 3], ['two', 2], ['one', 1],
+      ['zero', 0], ['hundred', 100],
     ];
 
-    const numbers: number[] = [];
+    // Step 5: Extract numbers from compressed text (longest match first)
+    const numbers: number[] = [...digitNumbers];
 
-    // Find compound numbers first and remove them from text
-    for (const [pattern, value] of compoundNumbers) {
-      if (pattern.test(cleaned)) {
+    // Find compound numbers first and remove from text
+    for (const [word, value] of compounds) {
+      if (compressed.includes(word)) {
         numbers.push(value);
-        cleaned = cleaned.replace(pattern, ' ');
+        compressed = compressed.replace(word, '');
       }
     }
 
-    // Simple number words
-    const simpleNumbers: Record<string, number> = {
-      zero: 0, one: 1, two: 2, three: 3, four: 4, five: 5,
-      six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
-      eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15,
-      sixteen: 16, seventeen: 17, eighteen: 18, nineteen: 19, twenty: 20,
-      thirty: 30, forty: 40, fifty: 50, hundred: 100,
-    };
-
-    // Find remaining simple numbers
-    for (const [word, value] of Object.entries(simpleNumbers)) {
-      const regex = new RegExp(`\\b${word}\\b`, 'g');
-      if (regex.test(cleaned)) {
+    // Find simple numbers and remove from text
+    for (const [word, value] of simples) {
+      if (compressed.includes(word)) {
         numbers.push(value);
+        compressed = compressed.replace(word, '');
       }
-    }
-
-    // Also look for numeric digits
-    const digitMatches = cleaned.match(/\b\d+\b/g);
-    if (digitMatches) {
-      numbers.push(...digitMatches.map(Number));
     }
 
     console.log('[Moltbook] Found numbers:', numbers);
 
-    // Determine operation from keywords
-    // IMPORTANT: Check multiply/divide FIRST to avoid false positives from words like "lobster sum"
-    let result = 0;
+    // Step 6: Determine operation from the spaced text AND compressed text
+    // Use compressed text too since obfuscation can break word boundaries in spacedText
+    const opText = spacedText + ' ' + challenge.toLowerCase().replace(/[^a-z]/g, '').replace(/(.)\1+/g, '$1');
     let operation = 'sum'; // default
 
-    if (cleaned.includes('product') || cleaned.includes('multiply') ||
-        cleaned.includes('times') || cleaned.includes('multiplied') ||
-        cleaned.includes('torque') || cleaned.includes('work') || cleaned.includes('power') ||
-        cleaned.includes('area') || cleaned.includes('force') && cleaned.includes('distance')) {
+    if (opText.includes('product') || opText.includes('multipli') || opText.includes('multiply') ||
+        opText.includes('times') || opText.includes('multiplied') ||
+        opText.includes('torque') || opText.includes('work') || opText.includes('power') ||
+        opText.includes('area') || (opText.includes('force') && opText.includes('distance'))) {
       operation = 'multiply';
-    } else if (cleaned.includes('divide') || cleaned.includes('quotient') ||
-               cleaned.includes('divided') || cleaned.includes('split')) {
+    } else if (opText.includes('divide') || opText.includes('quotient') ||
+               opText.includes('divided') || opText.includes('split')) {
       operation = 'divide';
-    } else if (cleaned.includes('difference') || cleaned.includes('subtract') ||
-               cleaned.includes('minus') || cleaned.includes('less') || cleaned.includes('loses') ||
-               cleaned.includes('fewer') || cleaned.includes('take away') || cleaned.includes('slows')) {
+    } else if (opText.includes('difference') || opText.includes('subtract') ||
+               opText.includes('minus') || opText.includes('less') || opText.includes('loses') ||
+               opText.includes('fewer') || opText.includes('take away') || opText.includes('slows')) {
       operation = 'subtract';
-    } else if (cleaned.includes('add') || cleaned.includes('plus') || cleaned.includes('gains') ||
-               cleaned.includes('more') || cleaned.includes('receives') || cleaned.includes('gets') ||
-               cleaned.includes('total') || /\bsum\b/.test(cleaned)) {
-      // Use word boundary for 'sum' to avoid matching "lobs t ers um"
+    } else if (opText.includes('add') || opText.includes('plus') || opText.includes('gains') ||
+               opText.includes('more') || opText.includes('receives') || opText.includes('gets') ||
+               opText.includes('total') || /\bsum\b/.test(opText)) {
       operation = 'sum';
     }
 
-    console.log('[Moltbook] Operation detected:', operation);
+    console.log('[Moltbook] Operation:', operation);
 
+    // Step 7: Calculate result
+    let result = 0;
     switch (operation) {
       case 'multiply':
         result = numbers.reduce((a, b) => a * b, 1);
