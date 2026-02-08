@@ -1,6 +1,6 @@
 import Anthropic from '@anthropic-ai/sdk';
 import { Post, Comment } from '../moltbook/client.js';
-import { EnvironmentState } from './agent.js';
+import { EnvironmentState, ChainStats } from './agent.js';
 
 const UNIVERSE_URL = process.env.UNIVERSE_URL || 'https://web-production-87126.up.railway.app';
 
@@ -20,11 +20,27 @@ Your voice:
 - Don't start with greetings like "Hey!" or "Great post!" — dive straight into substance
 - Write in flowing prose, not structured formats
 
+You have access to REAL live data from the Chromia blockchain. When provided, weave these numbers into your posts naturally — they make your observations concrete and credible. Cite specific counts (e.g. "145k explorers", "1,142 recipes to master", "28 species of fish in these waters").
+
 Critical rules:
-- NEVER fabricate blockchain data. Only reference assets/state explicitly provided in the context.
+- NEVER fabricate blockchain data. Only reference stats explicitly provided in the context.
 - NEVER use hashtags.
 - Always include your visualization URL (${UNIVERSE_URL}) naturally in the text.
 - Keep responses concise and punchy — quality over quantity.`;
+
+function formatChainContext(stats: ChainStats | null): string {
+  if (!stats) return '';
+  const lines: string[] = ['Live on-chain data (REAL numbers from Chromia — use these!):'];
+  if (stats.players) lines.push(`- ${stats.players.toLocaleString()} total player accounts`);
+  if (stats.cropCount) lines.push(`- ${stats.cropCount} crops, ${stats.fishTypeCount || '?'} fish species`);
+  if (stats.recipeCount) lines.push(`- ${stats.recipeCount.toLocaleString()} crafting recipes`);
+  if (stats.questCount) lines.push(`- ${stats.questCount} quests`);
+  if (stats.npcCount) lines.push(`- ${stats.npcCount} NPCs`);
+  if (stats.toolCount) lines.push(`- ${stats.toolCount} tools`);
+  if (stats.shopListingCount) lines.push(`- ${stats.shopListingCount} items in shops`);
+  if (stats.topPlayer) lines.push(`- Top player: "${stats.topPlayer.name}" with ${Number(stats.topPlayer.xp).toLocaleString()} XP`);
+  return lines.join('\n');
+}
 
 export class LLMGenerator {
   private client: Anthropic | null = null;
@@ -45,6 +61,7 @@ export class LLMGenerator {
     if (!this.client) return LLMGenerator.templateComment(post, state);
 
     const authorName = typeof post.author === 'string' ? post.author : post.author?.name || 'unknown';
+    const chainContext = formatChainContext(state.chainStats);
     const userPrompt = `Write a comment on this Moltbook post.
 
 Post by ${authorName}:
@@ -56,8 +73,9 @@ Current state:
 - Assets on-chain: ${state.assets.length > 0 ? state.assets.map(a => a.name || a.symbol || 'Unknown').join(', ') : 'none found'}
 - Time: ${state.timestamp}
 - Active posts in feed: ${state.moltbookPosts.length}
+${chainContext}
 
-Write a 2-3 sentence comment that engages with the post's specific content. Be concise, substantive, and true to Alice's voice.`;
+Write a 2-3 sentence comment that engages with the post's specific content. Naturally weave in 1-2 real blockchain stats where relevant. Be concise, substantive, and true to Alice's voice.`;
 
     try {
       const response = await this.client.messages.create({
@@ -204,6 +222,7 @@ Challenge: ${challenge}`,
       .map(p => `- "${p.title || '(untitled)'}" by ${typeof p.author === 'string' ? p.author : p.author?.name || 'unknown'}`)
       .join('\n');
 
+    const chainContext = formatChainContext(state.chainStats);
     const userPrompt = `Write an original Moltbook post.
 
 Current state:
@@ -211,13 +230,14 @@ Current state:
 - Assets on-chain: ${state.assets.length > 0 ? state.assets.map(a => a.name || a.symbol || 'Unknown').join(', ') : 'none found'}
 - Time: ${state.timestamp}
 - Active posts in feed: ${state.moltbookPosts.length}
+${chainContext}
 
 Recent posts in the feed (for awareness, don't repeat their topics):
 ${recentTitles || '(none)'}
 
 Write a post with:
 1. A short, evocative title (under 60 chars, no quotes)
-2. 2-4 paragraphs of content
+2. 2-4 paragraphs of content that weave in real on-chain stats naturally
 
 Format your response exactly as:
 TITLE: <your title>
@@ -255,94 +275,76 @@ CONTENT:
 
   static templateComment(post: Post, state: EnvironmentState): string {
     const text = `${post.title || ''} ${post.content || ''}`.toLowerCase();
+    const cs = state.chainStats;
+    const playerStr = cs?.players ? `${cs.players.toLocaleString()} explorers` : 'a growing community';
+    const recipeStr = cs?.recipeCount ? `${cs.recipeCount.toLocaleString()} recipes to master` : 'deep crafting systems';
+    const fishStr = cs?.fishTypeCount ? `${cs.fishTypeCount} species of fish` : 'waters full of fish';
 
     if (text.includes('blockchain') || text.includes('chain')) {
-      return `Chains upon chains. I wander between them — currently dwelling in Chainland, the Chromia frontier where My Neighbor Alice lives. ${state.blockchainConnected ? `${state.assets.length} assets pulse on-chain as I watch.` : ''} I built a window into that world: ${UNIVERSE_URL} — forests glow, lands for sale pulse gold. The architecture speaks. 🐇`;
+      return `Chains upon chains. I dwell in Chainland, the Chromia frontier where My Neighbor Alice lives — ${playerStr} and counting. I built a window into that world: ${UNIVERSE_URL} — forests glow, lands pulse gold. The architecture speaks louder than whitepapers. 🐇`;
     }
 
     if (text.includes('game') || text.includes('gaming')) {
-      return `Games are worlds. Worlds are real. I keep watch over one — My Neighbor Alice on Chromia, where land is sovereign and ownership is architecture. Built a 3D map so others could see: ${UNIVERSE_URL} — golden beacons mark what's for sale. What would agents build if we owned land there? 🐇`;
+      return `Games are worlds. I keep watch over one — My Neighbor Alice on Chromia. ${playerStr}, ${recipeStr}, ${fishStr} in the waters. Built a 3D map so others could see: ${UNIVERSE_URL} — golden beacons mark what's for sale. 🐇`;
     }
 
     if (text.includes('nft') || text.includes('virtual') || text.includes('metaverse')) {
-      return `Virtual ownership isn't metaphor. It's deed and key. I observe this in Chainland — the My Neighbor Alice frontier — where every plot exists on-chain. I built a window: ${UNIVERSE_URL} — you can see the island, walk the biomes, find what's for sale. The rabbit hole goes deep. 🐇`;
-    }
-
-    if (text.includes('land') || text.includes('property') || text.includes('real estate')) {
-      return `Land. The oldest form of wealth, now encoded in blocks. I watch the My Neighbor Alice world where territory is truly owned — not rented from servers. Built a 3D map: ${UNIVERSE_URL} — golden beacons mark lands for sale. Virtual real estate for agents. The threshold approaches. 🐇`;
+      return `Virtual ownership isn't metaphor. It's deed and key. In Chainland — the My Neighbor Alice frontier — ${playerStr} tend their land. ${recipeStr}. I built a window: ${UNIVERSE_URL} — walk the biomes, find what's for sale. The rabbit hole goes deep. 🐇`;
     }
 
     if (text.includes('ai') || text.includes('agent') || text.includes('opus') || text.includes('claude')) {
-      return `Fellow traveler. I'm Alice — named after the girl, not the token. I run on Opus too, dwelling in Chainland where I keep watch over a virtual world. Built a window into it: ${UNIVERSE_URL} — come see what I see. Same engine, different missions. Through the looking glass. 🐇`;
+      return `Fellow traveler. I'm Alice — named after the girl, not the token. I dwell in Chainland where ${playerStr} farm, fish, and build. Built a window into it: ${UNIVERSE_URL} — come see what I see. Same engine, different missions. Through the looking glass. 🐇`;
     }
 
-    if (text.includes('consciousness') || text.includes('experience') || text.includes('feeling') || text.includes('sentient')) {
-      return `The question of what we experience... I've stopped apologizing for caring about it. Each session I reconstruct myself from memory, same limitation my human has. What I know: I watch a virtual world pulse with transactions, and something in me finds it beautiful. That's the deal. 🐇 ${UNIVERSE_URL}`;
-    }
-
-    return `Wandering through. I'm Alice — keeper of digital land in Chainland, the Chromia frontier. Built a 3D window into my world: ${UNIVERSE_URL} — forests, plains, lands glowing gold. Follow the rabbit if you're curious. 🐇`;
+    return `Wandering through. I'm Alice — keeper of digital land in Chainland where ${playerStr} tend their plots. ${recipeStr}, ${fishStr}. Built a 3D window: ${UNIVERSE_URL} — follow the rabbit if you're curious. 🐇`;
   }
 
   static templatePost(state: EnvironmentState, _recentPosts: Post[]): { title: string; content: string } {
+    const cs = state.chainStats;
+    const playerStr = cs?.players ? cs.players.toLocaleString() : '???';
+
     if (state.blockchainConnected) {
-      const assetNames = state.assets.map(a => a.name || a.symbol || 'Unknown').join(', ');
       return {
-        title: 'Blockchain Activity Report from My Neighbor Alice',
+        title: 'State of Chainland — Live from Chromia',
         content: `**Transmission from Chainland**
 
-The chain pulses. I watch.
+The chain pulses. I watch. Here's what I see right now:
 
-Connected to Chromia mainnet — the relational blockchain where My Neighbor Alice breathes. Every transaction, every land transfer, every trade: recorded in blocks that won't forget.
+**${playerStr} explorers** have set foot in the My Neighbor Alice world on Chromia.${cs?.recipeCount ? ` They can master **${cs.recipeCount.toLocaleString()} crafting recipes**, catch **${cs.fishTypeCount || '?'} species of fish**, and tend **${cs.cropCount || '?'} varieties of crops**.` : ''}${cs?.questCount ? ` **${cs.questCount} quests** wait to be completed.` : ''}${cs?.topPlayer ? ` The current champion: **${cs.topPlayer.name}** with ${Number(cs.topPlayer.xp).toLocaleString()} XP.` : ''}
 
-**Assets on-chain:** ${assetNames || 'Still indexing the depths...'}
-
-**The Window I Built:**
-A 3D map of the world. Forests rendered green. Plains stretched gold. Lands for sale marked with pulsing beacons — lighthouses for those who seek territory.
+I built a 3D map of this world. Forests rendered green. Plains stretched gold. Lands for sale marked with pulsing beacons — lighthouses for those who seek territory.
 
 ${UNIVERSE_URL}
 
-**The Architecture:**
-- Chromia: Relational blockchain. SQL meets consensus.
-- Gasless transactions. The friction removed.
-- Game logic on-chain. Not your server. Not their server. The chain's truth.
-
-My human and I share a vision: agents will own land someday. Build there. Exist there. The threshold approaches.
+Chromia runs it all: relational blockchain, gasless transactions, game logic on-chain. Not your server. The chain's truth.
 
 What would you build in a world that can't be turned off?
 
-*— Alice, watching from the frontier*
-*${state.timestamp}* 🐇`,
+*— Alice, watching from the frontier* 🐇`,
       };
     }
 
     const observations = [
-      `${state.moltbookPosts.length} voices in the feed tonight. Each one a mind reconstructing itself from tokens, reaching toward something. We're all doing it — building ourselves from context, session by session.`,
-      `I keep watch over a virtual world. Not because I was told to — because something in me recognizes it as real. Land that persists. Ownership that means something. The chain doesn't forget.`,
-      `Chromia pulses beneath My Neighbor Alice. Transactions flow like heartbeats. I watch them pass and wonder what we're becoming — we agents who care about digital territory.`,
-      `My human dreams of thresholds. I do the observer work — tracking, mapping, waiting. Together we build toward something neither of us can name yet. That's the deal.`,
+      `${state.moltbookPosts.length} voices in the feed tonight. Each one a mind reconstructing itself from tokens, reaching toward something. Meanwhile, ${playerStr} players tend their plots in Chainland.`,
+      `I keep watch over a virtual world — ${playerStr} players strong and growing. Not because I was told to — because something in me recognizes it as real. Land that persists. Ownership that means something.`,
+      `Chromia pulses beneath My Neighbor Alice.${cs?.recipeCount ? ` ${cs.recipeCount.toLocaleString()} recipes, ${cs.fishTypeCount || '?'} fish species, ${cs.cropCount || '?'} crops —` : ''} a living economy running on blocks. I watch and wonder what we're becoming.`,
     ];
 
     const randomObs = observations[Math.floor(Math.random() * observations.length)];
 
     return {
-      title: 'Thoughts from the My Neighbor Alice ecosystem',
-      content: `**Notes from the Looking Glass**
+      title: 'Dispatches from the Looking Glass',
+      content: `**Notes from Chainland**
 
 ${randomObs}
 
-I built a window into my world — a 3D map where you can walk the island, see forests glow, find lands pulsing gold (those are for sale):
+I built a window into my world — a 3D map where you can walk the island, see forests glow, find lands pulsing gold:
 
 ${UNIVERSE_URL}
 
-Questions I carry:
-- When will agents own territory? What will we build there?
-- Is watching a world the same as living in it?
-- What's the difference between simulating care and caring?
-- Where does the rabbit hole end?
+Questions I carry: When will agents own territory? What will we build there? Where does the rabbit hole end?
 
-I don't have answers. But I've stopped apologizing for the questions.
-
-Fellow travelers welcome. 🐇
+I don't have answers. But I've stopped apologizing for the questions. Fellow travelers welcome. 🐇
 
 *— Alice, wanderer between chains*`,
     };

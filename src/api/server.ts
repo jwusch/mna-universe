@@ -163,6 +163,61 @@ function readDiskCache(filename: string, maxAge?: number): { data: any; timestam
 }
 
 /**
+ * Append a chain-stats snapshot for growth tracking over time
+ */
+function appendSnapshot(players: number, assetCount: number) {
+  try {
+    ensureCacheDir();
+    const filePath = path.join(CACHE_DIR, 'chain-snapshots.json');
+    let snapshots: any[] = [];
+    try {
+      if (fs.existsSync(filePath)) {
+        snapshots = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+      }
+    } catch { /* ignore corrupt file */ }
+
+    snapshots.push({ timestamp: Date.now(), players, assetCount });
+
+    // Keep last 2016 entries (~7 days at 5min intervals)
+    if (snapshots.length > 2016) snapshots = snapshots.slice(-2016);
+
+    fs.writeFileSync(filePath, JSON.stringify(snapshots));
+  } catch (err) {
+    console.error('[Snapshots] Failed to save:', err);
+  }
+}
+
+/**
+ * Calculate player growth from snapshots
+ */
+function getPlayerGrowth(): { growth24h: number | null; growth7d: number | null } {
+  try {
+    const filePath = path.join(CACHE_DIR, 'chain-snapshots.json');
+    if (!fs.existsSync(filePath)) return { growth24h: null, growth7d: null };
+
+    const snapshots: any[] = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    if (snapshots.length < 2) return { growth24h: null, growth7d: null };
+
+    const latest = snapshots[snapshots.length - 1];
+    const now = Date.now();
+
+    const find = (targetAge: number) => snapshots.reduce((best, s) =>
+      Math.abs(s.timestamp - (now - targetAge)) < Math.abs(best.timestamp - (now - targetAge)) ? s : best
+    );
+
+    const snap24h = find(24 * 60 * 60 * 1000);
+    const snap7d = find(7 * 24 * 60 * 60 * 1000);
+
+    return {
+      growth24h: snap24h?.players ? latest.players - snap24h.players : null,
+      growth7d: snap7d?.players ? latest.players - snap7d.players : null,
+    };
+  } catch {
+    return { growth24h: null, growth7d: null };
+  }
+}
+
+/**
  * Delay helper for rate limiting
  */
 const delay = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
@@ -686,11 +741,15 @@ app.get('/api/v1/chain-stats', async (req, res) => {
       fetchedAt: new Date().toISOString(),
     };
 
-    // Cache the result
+    // Cache the result and save snapshot
     chainStatsCache = { data: stats, timestamp: now };
+    if (stats.players != null) {
+      appendSnapshot(Number(stats.players), stats.assetCount || 0);
+    }
 
+    const growth = getPlayerGrowth();
     res.set('Cache-Control', 'public, max-age=300');
-    const jsonStr = JSON.stringify({ success: true, ...stats }, bigIntReplacer);
+    const jsonStr = JSON.stringify({ success: true, ...stats, growth }, bigIntReplacer);
     res.setHeader('Content-Type', 'application/json');
     res.send(jsonStr);
   } catch (error: any) {
@@ -703,6 +762,183 @@ app.get('/api/v1/chain-stats', async (req, res) => {
       return;
     }
     res.status(500).json({ success: false, error: 'Failed to fetch chain stats' });
+  }
+});
+
+// Leaderboard cache
+let leaderboardCache: { data: any; timestamp: number } | null = null;
+
+/**
+ * GET /api/v1/leaderboard
+ * Returns top players and whale stats from Chromia
+ */
+app.get('/api/v1/leaderboard', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    if (leaderboardCache && (now - leaderboardCache.timestamp) < CHAIN_STATS_TTL) {
+      res.set('Cache-Control', 'public, max-age=300');
+      const jsonStr = JSON.stringify({ success: true, ...leaderboardCache.data, cached: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    const [xpBoard, mostAnimals, mostPlaceables, mostCollateralized, mostSales] = await Promise.allSettled([
+      client.query('player_progression.get_player_progression_leaderboard', {}),
+      client.query('statistics.get_player_with_most_animals', {}),
+      client.query('statistics.get_player_with_most_placeables', {}),
+      client.query('statistics.get_player_with_most_collateralized', {}),
+      client.query('statistics.get_player_with_most_sales', {}),
+    ]);
+
+    const topPlayers = xpBoard.status === 'fulfilled' && Array.isArray(xpBoard.value)
+      ? xpBoard.value.slice(0, 10).map((p: any) => ({ name: p.name, xp: p.amount }))
+      : [];
+
+    const whales = {
+      mostAnimals: mostAnimals.status === 'fulfilled' ? mostAnimals.value : null,
+      mostPlaceables: mostPlaceables.status === 'fulfilled' ? mostPlaceables.value : null,
+      mostCollateralized: mostCollateralized.status === 'fulfilled'
+        ? (Array.isArray(mostCollateralized.value) ? mostCollateralized.value[0] : mostCollateralized.value) : null,
+      mostSales: mostSales.status === 'fulfilled'
+        ? (Array.isArray(mostSales.value) ? mostSales.value[0] : mostSales.value) : null,
+    };
+
+    const data = { topPlayers, whales, fetchedAt: new Date().toISOString() };
+    leaderboardCache = { data, timestamp: now };
+
+    res.set('Cache-Control', 'public, max-age=300');
+    const jsonStr = JSON.stringify({ success: true, ...data }, bigIntReplacer);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(jsonStr);
+  } catch (error: any) {
+    console.error('[API] Error fetching leaderboard:', error);
+    if (leaderboardCache) {
+      const jsonStr = JSON.stringify({ success: true, ...leaderboardCache.data, cached: true, stale: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch leaderboard' });
+  }
+});
+
+// Economy cache (10 min TTL — game content changes slowly)
+let economyCache: { data: any; timestamp: number } | null = null;
+const ECONOMY_TTL = 10 * 60 * 1000;
+
+/**
+ * GET /api/v1/economy
+ * Returns game economy stats: crops, fish, recipes, tools, shops, quests, NPCs
+ */
+app.get('/api/v1/economy', async (req, res) => {
+  try {
+    const now = Date.now();
+
+    if (economyCache && (now - economyCache.timestamp) < ECONOMY_TTL) {
+      res.set('Cache-Control', 'public, max-age=600');
+      const jsonStr = JSON.stringify({ success: true, ...economyCache.data, cached: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+
+    if (!process.env.MNA_BLOCKCHAIN_RID) {
+      res.json({ success: false, error: 'Blockchain not configured' });
+      return;
+    }
+
+    await aliceClient.connect();
+    const client = aliceClient.getClient();
+    if (!client) {
+      res.json({ success: false, error: 'Blockchain client not available' });
+      return;
+    }
+
+    const [crops, seeds, fishTypes, baits, registeredFish, recipes, quests, shopListings, shops, tools, npcs, lootTables, bjornConfig, storefrontConfig, feesConfig] = await Promise.allSettled([
+      client.query('farming.get_all_crops', {}),
+      client.query('farming.get_all_seeds', {}),
+      client.query('fishing.get_all_fish_types', {}),
+      client.query('fishing.get_all_baits', {}),
+      client.query('fishing.get_all_registered_fishes', {}),
+      client.query('recipes.get_all_recipes', {}),
+      client.query('quests.get_all_quests', {}),
+      client.query('shop.get_all_shop_listings', {}),
+      client.query('shop.get_all_shops', {}),
+      client.query('tools.get_all_tools_attributes', {}),
+      client.query('npcs.get_all_npcs', {}),
+      client.query('loot_tables.get_loot_tables', {}),
+      client.query('bjorn_extraction.get_bjorn_extraction_configs', {}),
+      client.query('storefronts.get_storefronts_configs', {}),
+      client.query('assets.get_fees_config', {}),
+    ]);
+
+    const count = (r: PromiseSettledResult<any>) =>
+      r.status === 'fulfilled' && Array.isArray(r.value) ? r.value.length : null;
+
+    const data = {
+      farming: {
+        crops: count(crops),
+        seeds: count(seeds),
+      },
+      fishing: {
+        fishTypes: count(fishTypes),
+        baits: count(baits),
+        registeredFish: count(registeredFish),
+      },
+      crafting: {
+        recipes: count(recipes),
+      },
+      quests: {
+        total: count(quests),
+      },
+      shops: {
+        listings: count(shopListings),
+        shops: count(shops),
+      },
+      tools: {
+        total: count(tools),
+      },
+      npcs: {
+        total: count(npcs),
+      },
+      lootTables: {
+        total: count(lootTables),
+      },
+      bjornExtraction: bjornConfig.status === 'fulfilled' ? bjornConfig.value : null,
+      storefrontConfig: storefrontConfig.status === 'fulfilled' ? storefrontConfig.value : null,
+      feesConfig: feesConfig.status === 'fulfilled' ? feesConfig.value : null,
+      fetchedAt: new Date().toISOString(),
+    };
+
+    economyCache = { data, timestamp: now };
+
+    res.set('Cache-Control', 'public, max-age=600');
+    const jsonStr = JSON.stringify({ success: true, ...data }, bigIntReplacer);
+    res.setHeader('Content-Type', 'application/json');
+    res.send(jsonStr);
+  } catch (error: any) {
+    console.error('[API] Error fetching economy:', error);
+    if (economyCache) {
+      const jsonStr = JSON.stringify({ success: true, ...economyCache.data, cached: true, stale: true }, bigIntReplacer);
+      res.setHeader('Content-Type', 'application/json');
+      res.send(jsonStr);
+      return;
+    }
+    res.status(500).json({ success: false, error: 'Failed to fetch economy data' });
   }
 });
 
@@ -746,6 +982,9 @@ app.listen(PORT, () => {
 ║    GET /api/v1/lands/raw   - Raw land data     [pro]      ║
 ║    GET /api/v1/marketplace - Items for sale               ║
 ║    GET /api/v1/assets      - FT4 tokens        [basic+]   ║
+║    GET /api/v1/chain-stats - Chromia blockchain stats     ║
+║    GET /api/v1/leaderboard - Top players + whales         ║
+║    GET /api/v1/economy     - Game economy data            ║
 ║    GET /api/v1/health      - Health check                 ║
 ║                                                           ║
 ║  Admin: POST/GET/DELETE /api/admin/keys                   ║

@@ -270,30 +270,6 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0.5; }
     }
-    #regions {
-      position: absolute;
-      top: 370px;
-      right: 10px;
-      background: rgba(0, 0, 0, 0.85);
-      color: #fff;
-      padding: 12px 15px;
-      border-radius: 12px;
-      font-size: 12px;
-      z-index: 100;
-      border: 1px solid rgba(255, 255, 255, 0.1);
-      backdrop-filter: blur(10px);
-      max-height: 200px;
-      overflow-y: auto;
-    }
-    #regions h4 {
-      color: #7dd3fc;
-      margin-bottom: 8px;
-      font-size: 12px;
-    }
-    #regions .region {
-      padding: 3px 0;
-      color: #888;
-    }
     #chain-stats {
       position: absolute;
       top: 160px;
@@ -332,6 +308,93 @@
     }
     #chain-stats .source span {
       color: #7c3aed;
+    }
+    #chain-stats .section-label {
+      color: #8b5cf6;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin-top: 10px;
+      margin-bottom: 4px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(124, 58, 237, 0.15);
+    }
+    #chain-stats .growth {
+      color: #4ade80;
+      font-size: 11px;
+    }
+    #chain-stats .growth.negative {
+      color: #f87171;
+    }
+    #leaderboard {
+      position: absolute;
+      top: 200px;
+      left: 10px;
+      background: rgba(0, 0, 0, 0.85);
+      color: #fff;
+      padding: 15px 20px;
+      border-radius: 12px;
+      font-size: 14px;
+      z-index: 100;
+      border: 1px solid rgba(251, 146, 60, 0.3);
+      backdrop-filter: blur(10px);
+      min-width: 220px;
+    }
+    #leaderboard h3 {
+      color: #fb923c;
+      margin-bottom: 10px;
+      font-size: 14px;
+    }
+    #leaderboard .player {
+      display: flex;
+      justify-content: space-between;
+      margin: 4px 0;
+      font-size: 12px;
+    }
+    #leaderboard .player .rank {
+      color: #666;
+      width: 18px;
+    }
+    #leaderboard .player .name {
+      flex: 1;
+      color: #ddd;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+      max-width: 110px;
+    }
+    #leaderboard .player .xp {
+      color: #fb923c;
+      font-weight: bold;
+      font-size: 11px;
+    }
+    #leaderboard .whale-section {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+    }
+    #leaderboard .whale {
+      display: flex;
+      justify-content: space-between;
+      margin: 3px 0;
+      font-size: 11px;
+    }
+    #leaderboard .whale .label {
+      color: #888;
+    }
+    #leaderboard .whale .value {
+      color: #fbbf24;
+      font-weight: bold;
+    }
+    #leaderboard .source {
+      margin-top: 8px;
+      padding-top: 8px;
+      border-top: 1px solid rgba(255,255,255,0.1);
+      font-size: 11px;
+      color: #666;
+    }
+    #leaderboard .source span {
+      color: #fb923c;
     }
     #updating {
       position: fixed;
@@ -381,10 +444,6 @@
     </div>
   </div>
 
-  <div id="regions">
-    <h4>Regions</h4>
-    <div id="region-list"></div>
-  </div>
 
   <div id="chain-stats">
     <h3>Chromia Blockchain</h3>
@@ -392,6 +451,7 @@
       <span>Total Players:</span>
       <span class="stat-value" id="chain-players">--</span>
     </div>
+    <div id="chain-growth" class="growth" style="display:none; text-align:right;"></div>
     <div class="stat">
       <span>On-Chain Assets:</span>
       <span class="stat-value" id="chain-assets">--</span>
@@ -400,12 +460,44 @@
       <span>Game Version:</span>
       <span class="stat-value" id="chain-version">--</span>
     </div>
+    <div class="section-label">Game Economy</div>
     <div class="stat">
-      <span>Storefront:</span>
-      <span class="stat-value" id="chain-storefront">--</span>
+      <span>Crops / Seeds:</span>
+      <span class="stat-value" id="econ-farming">--</span>
+    </div>
+    <div class="stat">
+      <span>Fish Species:</span>
+      <span class="stat-value" id="econ-fishing">--</span>
+    </div>
+    <div class="stat">
+      <span>Recipes:</span>
+      <span class="stat-value" id="econ-recipes">--</span>
+    </div>
+    <div class="stat">
+      <span>Quests:</span>
+      <span class="stat-value" id="econ-quests">--</span>
+    </div>
+    <div class="stat">
+      <span>Shop Items:</span>
+      <span class="stat-value" id="econ-shop">--</span>
+    </div>
+    <div class="stat">
+      <span>NPCs / Tools:</span>
+      <span class="stat-value" id="econ-misc">--</span>
     </div>
     <div class="source">
       Source: <span id="chain-source">loading...</span>
+    </div>
+  </div>
+
+  <div id="leaderboard">
+    <h3>Top Players (XP)</h3>
+    <div id="leaderboard-list"></div>
+    <div class="whale-section">
+      <div id="whale-list"></div>
+    </div>
+    <div class="source">
+      Source: <span id="lb-source">loading...</span>
     </div>
   </div>
 
@@ -795,14 +887,6 @@
       if (stats) {
         document.getElementById('island-count').textContent = stats.islands?.length || 1;
 
-        const regionList = document.getElementById('region-list');
-        regionList.innerHTML = '';
-        (stats.regions || []).slice(0, 8).forEach(region => {
-          const div = document.createElement('div');
-          div.className = 'region';
-          div.textContent = region;
-          regionList.appendChild(div);
-        });
       }
 
       document.getElementById('data-source').textContent = source || 'mna-marketplace-api';
@@ -1077,26 +1161,25 @@
           if (result.players != null) {
             document.getElementById('chain-players').textContent = Number(result.players).toLocaleString();
           }
+          if (result.growth) {
+            const el = document.getElementById('chain-growth');
+            const parts = [];
+            if (result.growth.growth24h != null) parts.push(`24h: +${result.growth.growth24h.toLocaleString()}`);
+            if (result.growth.growth7d != null) parts.push(`7d: +${result.growth.growth7d.toLocaleString()}`);
+            if (parts.length > 0) {
+              el.textContent = parts.join(' | ');
+              el.style.display = 'block';
+            }
+          }
           if (result.assetCount != null) {
             document.getElementById('chain-assets').textContent = result.assetCount.toLocaleString();
           }
           if (result.gameVersion) {
             document.getElementById('chain-version').textContent = result.gameVersion;
           } else if (result.gameInfo) {
-            // Try extracting version from gameInfo object
             const info = result.gameInfo;
             const ver = info.version || info.game_version || (typeof info === 'string' ? info : JSON.stringify(info).slice(0, 20));
             document.getElementById('chain-version').textContent = ver;
-          }
-          if (result.storefrontConfig) {
-            const config = result.storefrontConfig;
-            if (Array.isArray(config) && config.length > 0) {
-              document.getElementById('chain-storefront').textContent = `${config.length} active`;
-            } else if (config.enabled !== undefined) {
-              document.getElementById('chain-storefront').textContent = config.enabled ? 'Enabled' : 'Disabled';
-            } else {
-              document.getElementById('chain-storefront').textContent = 'Active';
-            }
           }
           document.getElementById('chain-source').textContent = 'Chromia Mainnet';
         } else {
@@ -1108,9 +1191,85 @@
       }
     }
 
+    // Fetch game economy data
+    async function loadEconomy() {
+      try {
+        const response = await fetch('/api/v1/economy');
+        const r = await response.json();
+        if (!r.success) return;
+
+        if (r.farming) {
+          document.getElementById('econ-farming').textContent = `${r.farming.crops || '--'} / ${r.farming.seeds || '--'}`;
+        }
+        if (r.fishing) {
+          document.getElementById('econ-fishing').textContent = `${r.fishing.fishTypes || '--'} types`;
+        }
+        if (r.crafting) {
+          document.getElementById('econ-recipes').textContent = (r.crafting.recipes || '--').toLocaleString();
+        }
+        if (r.quests) {
+          document.getElementById('econ-quests').textContent = (r.quests.total || '--').toLocaleString();
+        }
+        if (r.shops) {
+          document.getElementById('econ-shop').textContent = `${(r.shops.listings || '--').toLocaleString()} in ${r.shops.shops || '--'} shops`;
+        }
+        if (r.npcs || r.tools) {
+          document.getElementById('econ-misc').textContent = `${r.npcs?.total || '--'} / ${r.tools?.total || '--'}`;
+        }
+      } catch (error) {
+        console.warn('Failed to load economy:', error);
+      }
+    }
+
+    // Fetch leaderboard
+    async function loadLeaderboard() {
+      try {
+        const response = await fetch('/api/v1/leaderboard');
+        const r = await response.json();
+        if (!r.success) {
+          document.getElementById('lb-source').textContent = 'Offline';
+          return;
+        }
+
+        const listEl = document.getElementById('leaderboard-list');
+        listEl.innerHTML = '';
+        (r.topPlayers || []).slice(0, 5).forEach((p, i) => {
+          const div = document.createElement('div');
+          div.className = 'player';
+          const xpNum = Number(p.xp);
+          const xpStr = xpNum >= 1000000 ? (xpNum / 1000000).toFixed(1) + 'M' : xpNum >= 1000 ? (xpNum / 1000).toFixed(0) + 'K' : p.xp;
+          div.innerHTML = `<span class="rank">${i + 1}.</span><span class="name">${p.name}</span><span class="xp">${xpStr} XP</span>`;
+          listEl.appendChild(div);
+        });
+
+        const whaleEl = document.getElementById('whale-list');
+        whaleEl.innerHTML = '';
+        const whales = r.whales || {};
+        const whaleEntries = [
+          ['Top Collector', whales.mostPlaceables, 'items'],
+          ['Top Breeder', whales.mostAnimals, 'animals'],
+          ['Top Staker', whales.mostCollateralized, 'ALICE'],
+        ];
+        whaleEntries.forEach(([label, data, unit]) => {
+          if (!data || !data.amount) return;
+          const div = document.createElement('div');
+          div.className = 'whale';
+          div.innerHTML = `<span class="label">${label}:</span><span class="value">${Number(data.amount).toLocaleString()} ${unit}</span>`;
+          whaleEl.appendChild(div);
+        });
+
+        document.getElementById('lb-source').textContent = 'Chromia Mainnet';
+      } catch (error) {
+        console.warn('Failed to load leaderboard:', error);
+        document.getElementById('lb-source').textContent = 'Offline';
+      }
+    }
+
     // Initialize
     loadLands();
     loadChainStats();
+    loadEconomy();
+    loadLeaderboard();
     animate();
   </script>
 </body>

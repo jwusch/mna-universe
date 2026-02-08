@@ -27,10 +27,24 @@ export interface AgentConfig {
   };
 }
 
+export interface ChainStats {
+  players: number | null;
+  assetCount: number | null;
+  cropCount: number | null;
+  fishTypeCount: number | null;
+  recipeCount: number | null;
+  questCount: number | null;
+  npcCount: number | null;
+  toolCount: number | null;
+  shopListingCount: number | null;
+  topPlayer: { name: string; xp: string } | null;
+}
+
 export interface EnvironmentState {
   blockchainConnected: boolean;
   assets: any[];
   moltbookPosts: Post[];
+  chainStats: ChainStats | null;
   timestamp: string;
 }
 
@@ -161,6 +175,48 @@ export class AliceMoltbookAgent {
       console.log('[Agent] Blockchain connection failed, continuing with Moltbook only');
     }
 
+    // Fetch chain stats if blockchain connected
+    let chainStats: ChainStats | null = null;
+    if (blockchainConnected) {
+      try {
+        const client = this.alice.getClient();
+        if (client) {
+          const count = (r: PromiseSettledResult<any>) =>
+            r.status === 'fulfilled' && Array.isArray(r.value) ? r.value.length : null;
+
+          const [accountCount, crops, fishTypes, recipes, quests, npcs, tools, shopListings, leaderboard] = await Promise.allSettled([
+            client.query('assets.get_account_count', {}),
+            client.query('farming.get_all_crops', {}),
+            client.query('fishing.get_all_fish_types', {}),
+            client.query('recipes.get_all_recipes', {}),
+            client.query('quests.get_all_quests', {}),
+            client.query('npcs.get_all_npcs', {}),
+            client.query('tools.get_all_tools_attributes', {}),
+            client.query('shop.get_all_shop_listings', {}),
+            client.query('player_progression.get_player_progression_leaderboard', {}),
+          ]);
+
+          const lb = leaderboard.status === 'fulfilled' && Array.isArray(leaderboard.value) ? leaderboard.value : [];
+
+          chainStats = {
+            players: accountCount.status === 'fulfilled' ? Number(accountCount.value) : null,
+            assetCount: assets.length,
+            cropCount: count(crops),
+            fishTypeCount: count(fishTypes),
+            recipeCount: count(recipes),
+            questCount: count(quests),
+            npcCount: count(npcs),
+            toolCount: count(tools),
+            shopListingCount: count(shopListings),
+            topPlayer: lb.length > 0 ? { name: (lb[0] as any).name, xp: (lb[0] as any).amount } : null,
+          };
+          console.log('[Agent] Chain stats: players=' + chainStats.players + ', recipes=' + chainStats.recipeCount);
+        }
+      } catch (err) {
+        console.log('[Agent] Failed to fetch chain stats:', err);
+      }
+    }
+
     // Get Moltbook posts
     let moltbookPosts: Post[] = [];
     try {
@@ -174,6 +230,7 @@ export class AliceMoltbookAgent {
       blockchainConnected,
       assets,
       moltbookPosts,
+      chainStats,
       timestamp: new Date().toISOString(),
     };
   }
