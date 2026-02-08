@@ -294,6 +294,19 @@
       padding: 3px 0;
       color: #888;
     }
+    #updating {
+      position: fixed;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      color: #7dd3fc;
+      font-size: 14px;
+      z-index: 150;
+      text-align: center;
+      opacity: 0.7;
+      pointer-events: none;
+      display: none;
+    }
   </style>
 </head>
 <body>
@@ -391,6 +404,8 @@
     Loading Real MNA Universe...
     <div class="sub">Fetching from mkpl-api.prod.myneighboralice.com</div>
   </div>
+
+  <div id="updating">Updating land data...</div>
 
   <div id="toast" class="toast">Plot ID copied!</div>
 
@@ -686,77 +701,159 @@
     }
 
     // Fetch and render lands
+    let landsRendered = false;
+
+    function renderLands(lands, stats, source) {
+      // Clear previous land meshes
+      if (landsRendered) {
+        landMeshes.forEach(mesh => {
+          // mesh is inside a Group; remove the Group from the scene
+          const group = mesh.parent;
+          if (group) scene.remove(group);
+        });
+        landMeshes.length = 0;
+        landDataMap.clear();
+        forSaleMeshes.length = 0;
+      }
+
+      // Update stats
+      document.getElementById('total-lands').textContent = lands.length;
+      const forSaleLands = lands.filter(l => l.forSale);
+      document.getElementById('for-sale-count').textContent = forSaleLands.length;
+
+      if (forSaleLands.length > 0) {
+        const prices = forSaleLands.map(l => l.price || 0).filter(p => p > 0);
+        if (prices.length > 0) {
+          const minPrice = Math.min(...prices);
+          const maxPrice = Math.max(...prices);
+          document.getElementById('price-range').textContent = `${minPrice}-${maxPrice} ALICE`;
+        }
+      }
+
+      if (stats) {
+        document.getElementById('island-count').textContent = stats.islands?.length || 1;
+
+        const regionList = document.getElementById('region-list');
+        regionList.innerHTML = '';
+        (stats.regions || []).slice(0, 8).forEach(region => {
+          const div = document.createElement('div');
+          div.className = 'region';
+          div.textContent = region;
+          regionList.appendChild(div);
+        });
+      }
+
+      document.getElementById('data-source').textContent = source || 'mna-marketplace-api';
+
+      // Render land meshes
+      lands.forEach(land => {
+        const mesh = createLandMesh(land);
+        scene.add(mesh);
+      });
+
+      // Center camera on first render
+      if (!landsRendered && lands.length > 0) {
+        const xs = lands.map(l => l.x);
+        const ys = lands.map(l => l.y);
+        const minX = Math.min(...xs);
+        const maxX = Math.max(...xs);
+        const minY = Math.min(...ys);
+        const maxY = Math.max(...ys);
+
+        const centerX = (minX + maxX) / 2;
+        const centerY = (minY + maxY) / 2;
+        const worldWidth = maxX - minX;
+        const worldDepth = maxY - minY;
+        const worldSize = Math.max(worldWidth, worldDepth);
+
+        controls.target.set(centerX, 0, centerY);
+        const cameraDistance = worldSize * 0.6;
+        camera.position.set(centerX + cameraDistance * 0.5, cameraDistance * 0.4, centerY + cameraDistance * 0.5);
+
+        console.log(`World bounds: X(${minX.toFixed(1)}-${maxX.toFixed(1)}), Y(${minY.toFixed(1)}-${maxY.toFixed(1)})`);
+        console.log(`World center: (${centerX.toFixed(1)}, ${centerY.toFixed(1)}), size: ${worldSize.toFixed(1)}`);
+      }
+
+      landsRendered = true;
+      document.getElementById('loading').style.display = 'none';
+    }
+
     async function loadLands() {
+      const CACHE_KEY = 'mna_lands_cache';
+      const CACHE_MAX_AGE = 10 * 60 * 1000; // 10 minutes
+
+      // Check localStorage for cached data
+      let cachedResult = null;
+      try {
+        const raw = localStorage.getItem(CACHE_KEY);
+        if (raw) {
+          const parsed = JSON.parse(raw);
+          if (parsed.timestamp && (Date.now() - parsed.timestamp) < CACHE_MAX_AGE) {
+            cachedResult = parsed;
+          }
+        }
+      } catch (e) {
+        console.warn('Failed to read cache:', e);
+      }
+
+      // If we have valid cached data, render immediately
+      if (cachedResult) {
+        console.log(`Rendering ${cachedResult.data.length} lands from localStorage cache`);
+        renderLands(cachedResult.data, cachedResult.stats, cachedResult.source + ' (cached)');
+
+        // Background refresh
+        document.getElementById('updating').style.display = 'block';
+        try {
+          const response = await fetch('/api/v1/lands');
+          const result = await response.json();
+          if (result.success && result.data) {
+            // Save to localStorage
+            try {
+              localStorage.setItem(CACHE_KEY, JSON.stringify({
+                data: result.data,
+                stats: result.stats,
+                source: result.source,
+                timestamp: Date.now(),
+              }));
+            } catch (e) {
+              console.warn('Failed to write cache:', e);
+            }
+
+            // Re-render if data changed
+            if (result.data.length !== cachedResult.data.length) {
+              console.log(`Data changed (${cachedResult.data.length} -> ${result.data.length}), re-rendering`);
+              renderLands(result.data, result.stats, result.source);
+            }
+          }
+        } catch (error) {
+          console.warn('Background refresh failed:', error);
+        } finally {
+          document.getElementById('updating').style.display = 'none';
+        }
+        return;
+      }
+
+      // No cache — full loading screen fetch
       try {
         const response = await fetch('/api/v1/lands');
         const result = await response.json();
 
         if (result.success && result.data) {
-          const lands = result.data;
-          console.log(`Loaded ${lands.length} REAL lands from ${result.source}`);
+          console.log(`Loaded ${result.data.length} REAL lands from ${result.source}`);
 
-          // Update stats
-          document.getElementById('total-lands').textContent = lands.length;
-          const forSaleLands = lands.filter(l => l.forSale);
-          document.getElementById('for-sale-count').textContent = forSaleLands.length;
-
-          if (forSaleLands.length > 0) {
-            const prices = forSaleLands.map(l => l.price || 0).filter(p => p > 0);
-            if (prices.length > 0) {
-              const minPrice = Math.min(...prices);
-              const maxPrice = Math.max(...prices);
-              document.getElementById('price-range').textContent = `${minPrice}-${maxPrice} ALICE`;
-            }
+          // Save to localStorage
+          try {
+            localStorage.setItem(CACHE_KEY, JSON.stringify({
+              data: result.data,
+              stats: result.stats,
+              source: result.source,
+              timestamp: Date.now(),
+            }));
+          } catch (e) {
+            console.warn('Failed to write cache:', e);
           }
 
-          // Update islands and regions
-          if (result.stats) {
-            document.getElementById('island-count').textContent = result.stats.islands?.length || 1;
-
-            const regionList = document.getElementById('region-list');
-            regionList.innerHTML = '';
-            (result.stats.regions || []).slice(0, 8).forEach(region => {
-              const div = document.createElement('div');
-              div.className = 'region';
-              div.textContent = region;
-              regionList.appendChild(div);
-            });
-          }
-
-          document.getElementById('data-source').textContent = result.source;
-
-          // Render lands
-          lands.forEach(land => {
-            const mesh = createLandMesh(land);
-            scene.add(mesh);
-          });
-
-          // Center camera on the world
-          if (lands.length > 0) {
-            // Calculate bounds
-            const xs = lands.map(l => l.x);
-            const ys = lands.map(l => l.y);
-            const minX = Math.min(...xs);
-            const maxX = Math.max(...xs);
-            const minY = Math.min(...ys);
-            const maxY = Math.max(...ys);
-
-            const centerX = (minX + maxX) / 2;
-            const centerY = (minY + maxY) / 2;
-            const worldWidth = maxX - minX;
-            const worldDepth = maxY - minY;
-            const worldSize = Math.max(worldWidth, worldDepth);
-
-            controls.target.set(centerX, 0, centerY);
-            // Position camera to see the entire world
-            const cameraDistance = worldSize * 0.6;
-            camera.position.set(centerX + cameraDistance * 0.5, cameraDistance * 0.4, centerY + cameraDistance * 0.5);
-
-            console.log(`World bounds: X(${minX.toFixed(1)}-${maxX.toFixed(1)}), Y(${minY.toFixed(1)}-${maxY.toFixed(1)})`);
-            console.log(`World center: (${centerX.toFixed(1)}, ${centerY.toFixed(1)}), size: ${worldSize.toFixed(1)}`);
-          }
-
-          document.getElementById('loading').style.display = 'none';
+          renderLands(result.data, result.stats, result.source);
         }
       } catch (error) {
         console.error('Failed to load lands:', error);

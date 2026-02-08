@@ -11,6 +11,7 @@ import express from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import path from 'path';
+import fs from 'fs';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import axios from 'axios';
@@ -69,6 +70,7 @@ app.use('/api/admin', adminRouter);
 app.use(express.static(path.join(__dirname, '../visualization'), {
   dotfiles: 'deny',
   index: 'index.html',
+  maxAge: '1d',
 }));
 
 // Initialize Alice client for Chromia blockchain
@@ -101,6 +103,64 @@ interface RealLand {
 let landCache: RealLand[] = [];
 let lastFetch = 0;
 const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+const DISK_CACHE_MAX_AGE = 30 * 60 * 1000; // 30 minutes for startup disk cache
+
+// Disk cache directory
+const CACHE_DIR = path.join(__dirname, '../../cache');
+
+// Visualization transform cache (invalidated when landCache updates)
+let vizCache: any[] = [];
+let vizCacheTimestamp = 0;
+
+// Marketplace cache: per-type with 5-min TTL
+const marketplaceCache = new Map<string, { data: any[]; timestamp: number }>();
+
+// Guard against concurrent land fetches
+let refreshInProgress = false;
+
+/**
+ * Ensure cache directory exists
+ */
+function ensureCacheDir() {
+  try {
+    if (!fs.existsSync(CACHE_DIR)) {
+      fs.mkdirSync(CACHE_DIR, { recursive: true });
+    }
+  } catch (err) {
+    console.error('[Cache] Failed to create cache directory:', err);
+  }
+}
+
+/**
+ * Write data to disk cache
+ */
+function writeDiskCache(filename: string, data: any) {
+  try {
+    ensureCacheDir();
+    const filePath = path.join(CACHE_DIR, filename);
+    fs.writeFileSync(filePath, JSON.stringify({ data, timestamp: Date.now() }));
+    console.log(`[Cache] Wrote ${filename} to disk`);
+  } catch (err) {
+    console.error(`[Cache] Failed to write ${filename}:`, err);
+  }
+}
+
+/**
+ * Read data from disk cache. Returns null if file doesn't exist.
+ * If maxAge is provided, returns null if cache is older than maxAge.
+ */
+function readDiskCache(filename: string, maxAge?: number): { data: any; timestamp: number } | null {
+  try {
+    const filePath = path.join(CACHE_DIR, filename);
+    if (!fs.existsSync(filePath)) return null;
+    const raw = JSON.parse(fs.readFileSync(filePath, 'utf-8'));
+    if (maxAge && (Date.now() - raw.timestamp) > maxAge) return null;
+    return raw;
+  } catch (err) {
+    console.error(`[Cache] Failed to read ${filename}:`, err);
+    return null;
+  }
+}
 
 /**
  * Delay helper for rate limiting
@@ -136,122 +196,189 @@ async function fetchLandPage(cursor?: number, retries = 3): Promise<{ lands: any
 }
 
 /**
- * Fetch ALL real land data from MNA Marketplace API with pagination
+ * Perform the actual API fetch of all land data (no caching logic here)
+ */
+async function fetchLandsFromAPI(): Promise<RealLand[]> {
+  console.log('[API] Fetching ALL real land data from MNA Marketplace...');
+
+  // First, fetch all lands for sale to build the price map
+  let forSaleLands: any[] = [];
+  let forSaleCursor: number | undefined;
+
+  console.log('[API] Fetching lands for sale...');
+  do {
+    const url = forSaleCursor
+      ? `${MNA_API_BASE}/api/nfts?type=land&status=onSale&cursor=${forSaleCursor}`
+      : `${MNA_API_BASE}/api/nfts?type=land&status=onSale`;
+    const response = await axios.get(url);
+    forSaleLands = forSaleLands.concat(response.data.result || []);
+    forSaleCursor = response.data.cursor;
+  } while (forSaleCursor);
+
+  console.log(`[API] Found ${forSaleLands.length} lands for sale`);
+
+  // Create a map of lands for sale with their prices
+  const forSaleMap = new Map<number, { price: number; seller: string }>();
+  forSaleLands.forEach((nft: any) => {
+    const plotId = nft.metadata?.land?.plotId || nft.metadata?.tokenId;
+    const sale = nft.latestSale;
+    if (plotId && sale) {
+      forSaleMap.set(plotId, {
+        price: sale.listingPrice ? sale.listingPrice / 1000000 : 0,
+        seller: sale.seller?.nickName || sale.seller?.wallet?.slice(0, 6) + '...' || 'Unknown',
+      });
+    }
+  });
+
+  // Now fetch ALL lands with pagination
+  const allLands: any[] = [];
+  let cursor: number | undefined;
+  let totalLands = 0;
+  let pageCount = 0;
+
+  console.log('[API] Fetching all lands with pagination...');
+  do {
+    try {
+      const page = await fetchLandPage(cursor);
+      allLands.push(...page.lands);
+      cursor = page.nextCursor;
+      totalLands = page.total;
+      pageCount++;
+
+      if (pageCount % 10 === 0) {
+        console.log(`[API] Progress: ${allLands.length}/${totalLands} lands fetched...`);
+      }
+
+      // Small delay between requests to avoid rate limiting
+      if (cursor) {
+        await delay(100);
+      }
+    } catch (error: any) {
+      console.error(`[API] Failed to fetch page ${pageCount + 1}, stopping pagination:`, error.message);
+      break;
+    }
+  } while (cursor && allLands.length < totalLands);
+
+  console.log(`[API] Fetched ${allLands.length} total lands in ${pageCount} pages`);
+
+  // Transform to our format
+  const lands: RealLand[] = [];
+  const seenPlots = new Set<number>();
+
+  allLands.forEach((nft: any) => {
+    const land = nft.metadata?.land;
+    if (!land) return;
+
+    const plotId = land.plotId || nft.metadata?.tokenId;
+    if (seenPlots.has(plotId)) return;
+    seenPlots.add(plotId);
+
+    const saleInfo = forSaleMap.get(plotId);
+
+    lands.push({
+      id: String(nft.id),
+      plotId,
+      name: nft.metadata?.name || `Plot #${plotId}`,
+      island: land.island || 'Unknown',
+      region: land.region || 'Unknown',
+      x: parseInt(land.x) || 0,
+      y: parseInt(land.y) || 0,
+      width: parseInt(land.width) || 100,
+      height: parseInt(land.height) || 100,
+      soilType: land.soilType || 'unknown',
+      soilFertility: land.soilFertility || 1,
+      waterType: land.waterType || 'unknown',
+      waterQuality: land.waterQuality || 1,
+      forSale: !!saleInfo || nft.status === 'onSale',
+      price: saleInfo?.price,
+      seller: saleInfo?.seller,
+      image: nft.metadata?.image,
+    });
+  });
+
+  console.log(`[API] Processed ${lands.length} unique lands (${forSaleMap.size} for sale)`);
+  return lands;
+}
+
+/**
+ * Update in-memory and disk caches with fresh land data
+ */
+function updateLandCaches(lands: RealLand[]) {
+  landCache = lands;
+  lastFetch = Date.now();
+  vizCache = [];
+  vizCacheTimestamp = 0;
+  writeDiskCache('lands.json', lands);
+}
+
+/**
+ * Background refresh: fetch fresh data without blocking callers
+ */
+function triggerBackgroundRefresh() {
+  if (refreshInProgress) return;
+  refreshInProgress = true;
+  console.log('[API] Starting background refresh of land data...');
+
+  fetchLandsFromAPI()
+    .then(lands => {
+      updateLandCaches(lands);
+      console.log(`[API] Background refresh complete: ${lands.length} lands`);
+    })
+    .catch(err => {
+      console.error('[API] Background refresh failed:', err);
+    })
+    .finally(() => {
+      refreshInProgress = false;
+    });
+}
+
+/**
+ * Fetch ALL real land data with stale-while-revalidate pattern:
+ * - If memory cache exists (any age): return immediately
+ * - If stale (> 5 min): trigger non-blocking background refresh
+ * - If no cache at all: block and fetch (first load only)
  */
 async function fetchRealLands(): Promise<RealLand[]> {
   const now = Date.now();
-  if (landCache.length > 0 && (now - lastFetch) < CACHE_TTL) {
+
+  // If memory cache exists, return it (may be stale)
+  if (landCache.length > 0) {
+    // If stale, trigger background refresh
+    if ((now - lastFetch) > CACHE_TTL) {
+      triggerBackgroundRefresh();
+    }
     return landCache;
   }
 
-  console.log('[API] Fetching ALL real land data from MNA Marketplace...');
+  // No memory cache — try disk cache
+  const diskData = readDiskCache('lands.json');
+  if (diskData) {
+    console.log(`[API] Loaded ${diskData.data.length} lands from disk cache`);
+    landCache = diskData.data;
+    lastFetch = diskData.timestamp;
+    // Trigger background refresh if disk cache is stale
+    if ((now - diskData.timestamp) > CACHE_TTL) {
+      triggerBackgroundRefresh();
+    }
+    return landCache;
+  }
 
+  // No cache at all — blocking first fetch
   try {
-    // First, fetch all lands for sale to build the price map
-    let forSaleLands: any[] = [];
-    let forSaleCursor: number | undefined;
-
-    console.log('[API] Fetching lands for sale...');
-    do {
-      const url = forSaleCursor
-        ? `${MNA_API_BASE}/api/nfts?type=land&status=onSale&cursor=${forSaleCursor}`
-        : `${MNA_API_BASE}/api/nfts?type=land&status=onSale`;
-      const response = await axios.get(url);
-      forSaleLands = forSaleLands.concat(response.data.result || []);
-      forSaleCursor = response.data.cursor;
-    } while (forSaleCursor);
-
-    console.log(`[API] Found ${forSaleLands.length} lands for sale`);
-
-    // Create a map of lands for sale with their prices
-    const forSaleMap = new Map<number, { price: number; seller: string }>();
-    forSaleLands.forEach((nft: any) => {
-      const plotId = nft.metadata?.land?.plotId || nft.metadata?.tokenId;
-      const sale = nft.latestSale;
-      if (plotId && sale) {
-        forSaleMap.set(plotId, {
-          price: sale.listingPrice ? sale.listingPrice / 1000000 : 0,
-          seller: sale.seller?.nickName || sale.seller?.wallet?.slice(0, 6) + '...' || 'Unknown',
-        });
-      }
-    });
-
-    // Now fetch ALL lands with pagination
-    const allLands: any[] = [];
-    let cursor: number | undefined;
-    let totalLands = 0;
-    let pageCount = 0;
-
-    console.log('[API] Fetching all lands with pagination...');
-    do {
-      try {
-        const page = await fetchLandPage(cursor);
-        allLands.push(...page.lands);
-        cursor = page.nextCursor;
-        totalLands = page.total;
-        pageCount++;
-
-        if (pageCount % 10 === 0) {
-          console.log(`[API] Progress: ${allLands.length}/${totalLands} lands fetched...`);
-        }
-
-        // Small delay between requests to avoid rate limiting
-        if (cursor) {
-          await delay(100);
-        }
-      } catch (error: any) {
-        console.error(`[API] Failed to fetch page ${pageCount + 1}, stopping pagination:`, error.message);
-        break;
-      }
-    } while (cursor && allLands.length < totalLands);
-
-    console.log(`[API] Fetched ${allLands.length} total lands in ${pageCount} pages`);
-
-    // Transform to our format
-    const lands: RealLand[] = [];
-    const seenPlots = new Set<number>();
-
-    // Process all lands
-    allLands.forEach((nft: any) => {
-      const land = nft.metadata?.land;
-      if (!land) return;
-
-      const plotId = land.plotId || nft.metadata?.tokenId;
-      if (seenPlots.has(plotId)) return;
-      seenPlots.add(plotId);
-
-      const saleInfo = forSaleMap.get(plotId);
-
-      lands.push({
-        id: String(nft.id),
-        plotId,
-        name: nft.metadata?.name || `Plot #${plotId}`,
-        island: land.island || 'Unknown',
-        region: land.region || 'Unknown',
-        x: parseInt(land.x) || 0,
-        y: parseInt(land.y) || 0,
-        width: parseInt(land.width) || 100,
-        height: parseInt(land.height) || 100,
-        soilType: land.soilType || 'unknown',
-        soilFertility: land.soilFertility || 1,
-        waterType: land.waterType || 'unknown',
-        waterQuality: land.waterQuality || 1,
-        forSale: !!saleInfo || nft.status === 'onSale',
-        price: saleInfo?.price,
-        seller: saleInfo?.seller,
-        image: nft.metadata?.image,
-      });
-    });
-
-    console.log(`[API] Processed ${lands.length} unique lands (${forSaleMap.size} for sale)`);
-
-    landCache = lands;
-    lastFetch = now;
+    const lands = await fetchLandsFromAPI();
+    updateLandCaches(lands);
     return lands;
-
   } catch (error) {
     console.error('[API] Error fetching from MNA API:', error);
-    return landCache; // Return cached data on error
+    // Last resort: try disk cache of any age
+    const fallback = readDiskCache('lands.json');
+    if (fallback) {
+      console.log(`[API] Using stale disk cache as fallback (${fallback.data.length} lands)`);
+      landCache = fallback.data;
+      lastFetch = fallback.timestamp;
+      return landCache;
+    }
+    return [];
   }
 }
 
@@ -337,19 +464,26 @@ function transformForVisualization(lands: RealLand[]) {
 app.get('/api/v1/lands', async (req, res) => {
   try {
     const realLands = await fetchRealLands();
-    let lands = transformForVisualization(realLands);
+
+    // Use viz cache if available and fresh
+    if (vizCache.length === 0 || vizCacheTimestamp !== lastFetch) {
+      vizCache = transformForVisualization(realLands);
+      vizCacheTimestamp = lastFetch;
+    }
+
+    let lands = vizCache;
 
     // Apply filters with input validation
     if (req.query.forSale === 'true') {
-      lands = lands.filter(l => l.forSale);
+      lands = lands.filter((l: any) => l.forSale);
     }
     if (typeof req.query.island === 'string' && req.query.island.length <= 100) {
       const island = req.query.island.toLowerCase();
-      lands = lands.filter(l => l.island.toLowerCase().includes(island));
+      lands = lands.filter((l: any) => l.island.toLowerCase().includes(island));
     }
     if (typeof req.query.region === 'string' && req.query.region.length <= 100) {
       const region = req.query.region.toLowerCase();
-      lands = lands.filter(l => l.region.toLowerCase().includes(region));
+      lands = lands.filter((l: any) => l.region.toLowerCase().includes(region));
     }
 
     // Free tier: cap results at 50
@@ -358,6 +492,15 @@ app.get('/api/v1/lands', async (req, res) => {
     if (tier === 'free') {
       lands = lands.slice(0, 50);
     }
+
+    // HTTP cache headers
+    const etag = `"lands-${lastFetch}"`;
+    if (req.headers['if-none-match'] === etag) {
+      res.status(304).end();
+      return;
+    }
+    res.set('Cache-Control', 'public, max-age=300, stale-while-revalidate=600');
+    res.set('ETag', etag);
 
     res.json({
       success: true,
@@ -368,7 +511,7 @@ app.get('/api/v1/lands', async (req, res) => {
       stats: {
         total: lands.length,
         totalAvailable: totalBeforeCap,
-        forSale: lands.filter(l => l.forSale).length,
+        forSale: lands.filter((l: any) => l.forSale).length,
         islands: [...new Set(realLands.map(l => l.island))],
         regions: [...new Set(realLands.map(l => l.region))],
       }
@@ -399,32 +542,56 @@ app.get('/api/v1/lands/raw', async (req, res) => {
 
 /**
  * GET /api/v1/marketplace
- * Returns items currently for sale
+ * Returns items currently for sale (with per-type caching)
  */
 app.get('/api/v1/marketplace', async (req, res) => {
   try {
     const allowedTypes = ['land', 'item', 'avatar', 'decoration'];
     const type = allowedTypes.includes(req.query.type as string) ? req.query.type as string : 'land';
-    const response = await axios.get(`${MNA_API_BASE}/api/nfts`, {
-      params: { type, status: 'onSale', limit: 100 },
-    });
-    const items = response.data.result || [];
 
-    const transformed = items.map((nft: any) => ({
-      id: nft.id,
-      name: nft.metadata?.name,
-      type: nft.metadata?.type,
-      image: nft.metadata?.image,
-      price: nft.latestSale?.listingPrice ? nft.latestSale.listingPrice / 1000000 : null,
-      seller: nft.latestSale?.seller?.nickName || 'Unknown',
-      chain: nft.chain,
-      land: nft.metadata?.land,
-    }));
+    let transformed: any[];
+    const cached = marketplaceCache.get(type);
+    const now = Date.now();
+
+    if (cached && (now - cached.timestamp) < CACHE_TTL) {
+      transformed = cached.data;
+    } else {
+      // Try disk cache first
+      const diskCacheFile = `marketplace-${type}.json`;
+      const diskData = cached ? null : readDiskCache(diskCacheFile, CACHE_TTL);
+
+      if (diskData) {
+        transformed = diskData.data;
+        marketplaceCache.set(type, { data: diskData.data, timestamp: diskData.timestamp });
+      } else {
+        const response = await axios.get(`${MNA_API_BASE}/api/nfts`, {
+          params: { type, status: 'onSale', limit: 100 },
+        });
+        const items = response.data.result || [];
+
+        transformed = items.map((nft: any) => ({
+          id: nft.id,
+          name: nft.metadata?.name,
+          type: nft.metadata?.type,
+          image: nft.metadata?.image,
+          price: nft.latestSale?.listingPrice ? nft.latestSale.listingPrice / 1000000 : null,
+          seller: nft.latestSale?.seller?.nickName || 'Unknown',
+          chain: nft.chain,
+          land: nft.metadata?.land,
+        }));
+
+        marketplaceCache.set(type, { data: transformed, timestamp: now });
+        writeDiskCache(diskCacheFile, transformed);
+      }
+    }
 
     // Free tier: cap results at 20
     const tier = req.auth?.tier || 'free';
     const limited = tier === 'free' && transformed.length > 20;
     const data = tier === 'free' ? transformed.slice(0, 20) : transformed;
+
+    // HTTP cache headers
+    res.set('Cache-Control', 'public, max-age=300');
 
     res.json({
       success: true,
@@ -445,6 +612,8 @@ app.get('/api/v1/marketplace', async (req, res) => {
  */
 app.get('/api/v1/assets', async (req, res) => {
   try {
+    res.set('Cache-Control', 'public, max-age=60');
+
     if (process.env.MNA_BLOCKCHAIN_RID) {
       const assets = await aliceClient.getAllAssets();
 
@@ -522,10 +691,23 @@ app.listen(PORT, () => {
 ╚═══════════════════════════════════════════════════════════╝
   `);
 
-  // Pre-fetch land data on startup
-  fetchRealLands().then(lands => {
-    console.log(`[API] Pre-loaded ${lands.length} real lands from MNA Marketplace`);
-  });
+  // Load disk cache on startup, then refresh in background
+  ensureCacheDir();
+  const diskStartup = readDiskCache('lands.json', DISK_CACHE_MAX_AGE);
+  if (diskStartup) {
+    landCache = diskStartup.data;
+    lastFetch = diskStartup.timestamp;
+    console.log(`[API] Loaded ${landCache.length} lands from disk cache (age: ${Math.round((Date.now() - diskStartup.timestamp) / 1000)}s)`);
+    // Refresh in background if stale
+    if ((Date.now() - diskStartup.timestamp) > CACHE_TTL) {
+      triggerBackgroundRefresh();
+    }
+  } else {
+    // No disk cache — blocking fetch on first startup
+    fetchRealLands().then(lands => {
+      console.log(`[API] Pre-loaded ${lands.length} real lands from MNA Marketplace`);
+    });
+  }
 
   // Start Moltbook heartbeat agent if explicitly enabled and API key is configured
   if (process.env.ENABLE_HEARTBEAT === 'true' && process.env.MOLTBOOK_API_KEY) {

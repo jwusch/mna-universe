@@ -5,3 +5,4 @@ dist/
 .DS_Store
 config/api-keys.json
 conversations.json
+cache/
