@@ -53,16 +53,16 @@ export class AliceMoltbookAgent {
   private storePath: string;
 
   constructor(config: AgentConfig) {
+    this.llm = new LLMGenerator();
     this.moltbook = new MoltbookClient({
       apiKey: config.moltbook.apiKey,
       agentName: config.moltbook.agentName,
-    });
+    }, (ch) => this.llm.solvePuzzle(ch));
     this.alice = new AliceClient({
       nodeUrl: config.alice.nodeUrl,
       blockchainRid: config.alice.blockchainRid,
     });
     this.agentName = config.moltbook.agentName;
-    this.llm = new LLMGenerator();
     this.storePath = path.join(process.cwd(), 'conversations.json');
   }
 

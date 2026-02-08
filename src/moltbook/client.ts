@@ -51,9 +51,11 @@ export interface VerificationChallenge {
 export class MoltbookClient {
   private client: AxiosInstance;
   private apiKey?: string;
+  private challengeSolver?: (challenge: string) => Promise<string>;
 
-  constructor(config: MoltbookConfig = {}) {
+  constructor(config: MoltbookConfig = {}, challengeSolver?: (challenge: string) => Promise<string>) {
     this.apiKey = config.apiKey;
+    this.challengeSolver = challengeSolver;
     this.client = axios.create({
       baseURL: config.baseUrl || 'https://www.moltbook.com/api/v1',
       headers: {
@@ -114,7 +116,7 @@ export class MoltbookClient {
     // Handle verification if required
     if (response.data.verification_required && response.data.verification) {
       console.log('[Moltbook] Verification required, solving challenge...');
-      const answer = this.solveChallenge(response.data.verification.challenge);
+      const answer = await this.solveChallenge(response.data.verification.challenge);
       await this.verify(response.data.verification.code, answer);
       console.log('[Moltbook] Post verified and published');
     }
@@ -138,7 +140,7 @@ export class MoltbookClient {
 
     if (response.data.verification_required && response.data.verification) {
       console.log('[Moltbook] Verification required, solving challenge...');
-      const answer = this.solveChallenge(response.data.verification.challenge);
+      const answer = await this.solveChallenge(response.data.verification.challenge);
       await this.verify(response.data.verification.code, answer);
       console.log('[Moltbook] Reply verified and published');
     }
@@ -156,7 +158,7 @@ export class MoltbookClient {
     // Handle verification if required
     if (response.data.verification_required && response.data.verification) {
       console.log('[Moltbook] Verification required, solving challenge...');
-      const answer = this.solveChallenge(response.data.verification.challenge);
+      const answer = await this.solveChallenge(response.data.verification.challenge);
       await this.verify(response.data.verification.code, answer);
       console.log('[Moltbook] Comment verified and published');
     }
@@ -178,11 +180,23 @@ export class MoltbookClient {
   /**
    * Solve Moltbook's verification challenge (lobster math problems)
    *
-   * Strategy: compress text by removing ALL spaces and non-alpha chars,
-   * then dedup consecutive letters, then find number words in the stream.
-   * This defeats obfuscation like "twen ty three" or "twenty f iv e".
+   * Uses LLM solver if available (near-100% accuracy), falls back to
+   * regex-based solver. Strategy for regex: compress text by removing
+   * ALL spaces and non-alpha chars, then dedup consecutive letters,
+   * then find number words in the stream.
    */
-  private solveChallenge(challenge: string): string {
+  private async solveChallenge(challenge: string): Promise<string> {
+    if (this.challengeSolver) {
+      try {
+        return await this.challengeSolver(challenge);
+      } catch (error) {
+        console.error('[Moltbook] LLM solver failed, falling back to regex:', error);
+      }
+    }
+    return this.regexSolveChallenge(challenge);
+  }
+
+  private regexSolveChallenge(challenge: string): string {
     console.log('[Moltbook] Raw challenge:', challenge);
 
     // Step 1: Extract any digit numbers from the original text

@@ -171,6 +171,31 @@ ${transcript}`;
     return messages.map(m => `${m.author}: ${m.content.slice(0, 80)}...`).join(' | ');
   }
 
+  async solvePuzzle(challenge: string): Promise<string> {
+    if (!this.client) throw new Error('No Anthropic client available');
+
+    const response = await this.client.messages.create({
+      model: this.model,
+      max_tokens: 50,
+      messages: [{
+        role: 'user',
+        content: `You are solving a math verification puzzle. The text below is obfuscated with random casing, spacing, punctuation, and repeated characters, but it describes a simple arithmetic problem with two numbers and one operation (add, subtract, multiply, or divide).
+
+Read through the noise, identify the two numbers and the operation, compute the result, and respond with ONLY the numeric answer formatted as a decimal with two places (e.g. "42.00"). Nothing else.
+
+Challenge: ${challenge}`,
+      }],
+    });
+
+    const text = response.content[0].type === 'text' ? response.content[0].text.trim() : '';
+    // Extract the first number-like token from the response
+    const match = text.match(/-?\d+\.?\d*/);
+    if (!match) throw new Error(`Could not parse LLM answer: "${text}"`);
+    const answer = parseFloat(match[0]).toFixed(2);
+    console.log(`[LLM] Solved puzzle: "${challenge.slice(0, 60)}..." → ${answer}`);
+    return answer;
+  }
+
   async generatePost(state: EnvironmentState, recentPosts: Post[]): Promise<{ title: string; content: string }> {
     if (!this.client) return LLMGenerator.templatePost(state, recentPosts);
 
