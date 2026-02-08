@@ -1367,6 +1367,23 @@
 
     window.addEventListener('click', onMouseClick, false);
 
+    // Double-click to zoom into a land tile
+    window.addEventListener('dblclick', (event) => {
+      if (event.target.closest('#land-info') || event.target.closest('#player-search') || event.target.closest('#storefront')) return;
+
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+      raycaster.setFromCamera(mouse, camera);
+      const intersects = raycaster.intersectObjects(landMeshes);
+
+      if (intersects.length > 0) {
+        const landId = intersects[0].object.userData.landId;
+        const land = landDataMap.get(landId);
+        if (land) zoomToLand(land);
+      }
+    }, false);
+
     // Handle window resize
     window.addEventListener('resize', () => {
       camera.aspect = window.innerWidth / window.innerHeight;
