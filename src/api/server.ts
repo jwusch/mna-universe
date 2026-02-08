@@ -486,12 +486,8 @@ app.get('/api/v1/lands', async (req, res) => {
       lands = lands.filter((l: any) => l.region.toLowerCase().includes(region));
     }
 
-    // Free tier: cap results at 50
     const tier = req.auth?.tier || 'free';
     const totalBeforeCap = lands.length;
-    if (tier === 'free') {
-      lands = lands.slice(0, 50);
-    }
 
     // HTTP cache headers
     const etag = `"lands-${lastFetch}"`;
@@ -507,7 +503,6 @@ app.get('/api/v1/lands', async (req, res) => {
       data: lands,
       source: 'mna-marketplace-api',
       tier,
-      ...(tier === 'free' && totalBeforeCap > 50 ? { limited: true, message: 'Free tier limited to 50 results. Use an API key for full access.' } : {}),
       stats: {
         total: lands.length,
         totalAvailable: totalBeforeCap,
