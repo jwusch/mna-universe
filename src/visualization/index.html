@@ -1520,11 +1520,11 @@
             saleDiv.style.display = 'none';
           }
 
-          // Update MNA map link - deep link to specific land plot
+          // Update MNA map link (no deep linking available, just opens map)
           const mapBtn = document.getElementById('map-btn');
-          const plotId = land.plotId || land.id;
-          mapBtn.href = `https://myneighboralice.com/map/${plotId}`;
-          mapBtn.title = `View Plot #${plotId} on MNA in-game map`;
+          mapBtn.href = 'https://myneighboralice.com/map/';
+          const coords = `(${land.realX || land.x}, ${land.realY || land.y})`;
+          mapBtn.title = `Open MNA map — navigate to ${coords}`;
 
           document.getElementById('land-info').style.display = 'block';
           document.getElementById('plot-deep-dive').style.display = 'none';
@@ -1731,6 +1731,13 @@
               }
               const mapEl = document.getElementById('plot-map');
               mapEl.innerHTML = '';
+              const loc = area.location;
+              if (loc) {
+                const posLabel = document.createElement('div');
+                posLabel.style.cssText = 'font-size:11px; color:#888; margin-bottom:4px;';
+                posLabel.textContent = `World position: (${loc.x}, ${loc.y}) — ${gridW}×${gridH} grid`;
+                mapEl.appendChild(posLabel);
+              }
               mapEl.appendChild(canvas);
             } else if (data.map) {
               // Fallback: show raw tile data if cells not present
