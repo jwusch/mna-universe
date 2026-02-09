@@ -736,6 +736,12 @@
       color: #ccc;
       line-height: 1.5;
     }
+    #plot-terrain-canvas {
+      border: 1px solid rgba(139,92,246,0.3);
+      border-radius: 4px;
+      display: block;
+      margin-top: 4px;
+    }
     #land-info {
       max-height: 70vh;
       overflow-y: auto;
@@ -947,7 +953,15 @@
         <div class="dd-content" id="plot-nodes">Loading...</div>
       </div>
       <div class="deep-dive-section">
-        <div class="section-title">🗺️ Map Data</div>
+        <div class="section-title">🏠 Placeables</div>
+        <div class="dd-content" id="plot-placeables">Loading...</div>
+      </div>
+      <div class="deep-dive-section">
+        <div class="section-title">👤 Avatar</div>
+        <div class="dd-content" id="plot-avatar">Loading...</div>
+      </div>
+      <div class="deep-dive-section">
+        <div class="section-title">🗺️ Terrain</div>
         <div class="dd-content" id="plot-map">Loading...</div>
       </div>
     </div>
@@ -1587,6 +1601,8 @@
         document.getElementById('plot-farming').textContent = 'Loading...';
         document.getElementById('plot-fishing').textContent = 'Loading...';
         document.getElementById('plot-nodes').textContent = 'Loading...';
+        document.getElementById('plot-placeables').textContent = 'Loading...';
+        document.getElementById('plot-avatar').textContent = 'Loading...';
         document.getElementById('plot-map').textContent = 'Loading...';
 
         // Fetch deep-dive data from Chromia
@@ -1647,8 +1663,77 @@
               document.getElementById('plot-nodes').textContent = 'No resource nodes';
             }
 
-            // Map data
-            if (data.map) {
+            // Placeables
+            if (data.placeables) {
+              const cleanName = (name) => name
+                .replace(/^(placeable_|equippable_|seed_|fish_|resourcenode_|craftingstation_)/, '')
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+              const pl = data.placeables;
+              if (pl.placedCount > 0 || pl.inventory.length > 0) {
+                let html = `${pl.placedCount} item${pl.placedCount !== 1 ? 's' : ''} placed on plot`;
+                if (pl.inventory.length > 0) {
+                  const items = pl.inventory
+                    .sort((a, b) => b.amount - a.amount)
+                    .slice(0, 12)
+                    .map(i => `${cleanName(i.name)} x${i.amount}`)
+                    .join(', ');
+                  html += `<br><small style="color:#888">Inventory: ${items}${pl.inventory.length > 12 ? '...' : ''}</small>`;
+                }
+                document.getElementById('plot-placeables').innerHTML = html;
+              } else {
+                document.getElementById('plot-placeables').textContent = 'No placeables';
+              }
+            } else {
+              document.getElementById('plot-placeables').textContent = 'No placeables data';
+            }
+
+            // Avatar
+            if (data.avatar && data.avatar.equippables && data.avatar.equippables.length > 0) {
+              const cleanName = (name) => name
+                .replace(/^(placeable_|equippable_|seed_|fish_|resourcenode_|hair_|craftingstation_)/, '')
+                .replace(/_/g, ' ')
+                .replace(/\b\w/g, c => c.toUpperCase());
+              const items = data.avatar.equippables.map(e => cleanName(e.name)).join(', ');
+              document.getElementById('plot-avatar').innerHTML =
+                `Wearing: <small style="color:#888">${items}</small>`;
+            } else {
+              document.getElementById('plot-avatar').textContent = 'No avatar data';
+            }
+
+            // Terrain minimap
+            if (data.map && data.map.cells) {
+              const cells = data.map.cells;
+              const area = data.map.area || {};
+              const gridW = area.size?.width || 100;
+              const gridH = Math.floor(cells.length / gridW) || gridW;
+              const canvasW = 150;
+              const canvasH = Math.round(canvasW * (gridH / gridW));
+              const cellW = canvasW / gridW;
+              const cellH = canvasH / gridH;
+              const canvas = document.createElement('canvas');
+              canvas.id = 'plot-terrain-canvas';
+              canvas.width = canvasW;
+              canvas.height = canvasH;
+              const ctx = canvas.getContext('2d');
+              const colors = {
+                0: '#3b82f6', // water
+                1: '#22c55e', // grass
+                2: '#a16207', // dirt/path
+                3: '#eab308', // sand/special
+              };
+              for (let y = 0; y < gridH; y++) {
+                for (let x = 0; x < gridW; x++) {
+                  const val = cells[y * gridW + x] ?? 0;
+                  ctx.fillStyle = colors[val] || '#555';
+                  ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
+                }
+              }
+              const mapEl = document.getElementById('plot-map');
+              mapEl.innerHTML = '';
+              mapEl.appendChild(canvas);
+            } else if (data.map) {
+              // Fallback: show raw tile data if cells not present
               const mapData = Array.isArray(data.map) ? data.map : [data.map];
               const tileTypes = {};
               mapData.forEach(t => {

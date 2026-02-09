@@ -1140,22 +1140,55 @@ app.get('/api/v1/plots/:plotNumber', async (req, res) => {
     // Generate plot_id Buffer from plot_number
     const plotId = await client.query('plots.generate_plot_id', { plot_number: plotNumber });
 
-    // Query all plot data in parallel
-    const [plotMeta, plotMap, farmingState, fishList, plotNodes] = await Promise.allSettled([
+    // Phase 1: Query all plot data in parallel
+    const [plotMeta, plotMap, farmingState, fishList, plotNodes, placedItems] = await Promise.allSettled([
       client.query('plots.get_plot_meta', { plot_id: plotId }),
       client.query('plots.get_plot_map', { plot_id: plotId }),
       client.query('farming.state_at_plot', { plot_id: plotId }),
       client.query('fishing.get_fish_master_list', { plot_id: plotId }),
       client.query('plot_nodes.get_nodes_on_plot', { plot_id: plotId }),
+      client.query('placeables.all_placeables_at', { griddable_uid: plotId }),
     ]);
+
+    // Phase 2: If we have an owner, fetch avatar + placeables inventory
+    let avatarData: any = null;
+    let placeablesInventory: any = null;
+    const meta = plotMeta.status === 'fulfilled' ? plotMeta.value as any : null;
+    const ownerName = meta?.owner_name;
+    if (ownerName) {
+      try {
+        const player = await client.query('player.find_by_username', { username: ownerName }) as any;
+        if (player?.id) {
+          const [avatarResult, inventoryResult] = await Promise.allSettled([
+            client.query('avatar.get', { account_id: player.id }),
+            client.query('placeables.all_my_placeables', { account_id: player.id }),
+          ]);
+          avatarData = avatarResult.status === 'fulfilled' ? avatarResult.value : null;
+          placeablesInventory = inventoryResult.status === 'fulfilled' ? inventoryResult.value : null;
+        }
+      } catch (_) { /* owner lookup failed, continue without */ }
+    }
+
+    const placedArr = placedItems.status === 'fulfilled' && Array.isArray(placedItems.value) ? placedItems.value : [];
 
     const data = {
       plotNumber,
-      meta: plotMeta.status === 'fulfilled' ? plotMeta.value : null,
+      meta,
       map: plotMap.status === 'fulfilled' ? plotMap.value : null,
       farming: farmingState.status === 'fulfilled' ? farmingState.value : null,
       fishing: fishList.status === 'fulfilled' ? fishList.value : null,
       nodes: plotNodes.status === 'fulfilled' ? plotNodes.value : null,
+      placeables: {
+        placedCount: placedArr.length,
+        inventory: Array.isArray(placeablesInventory)
+          ? placeablesInventory.map((p: any) => ({ name: p.name || p.prototype_name || 'unknown', amount: p.amount ?? 1 }))
+          : [],
+      },
+      avatar: avatarData ? {
+        equippables: Array.isArray(avatarData) ? avatarData.map((e: any) => ({ name: e.name || e.prototype_name || String(e) }))
+          : avatarData.equippables ? avatarData.equippables.map((e: any) => ({ name: e.name || e.prototype_name || String(e) }))
+          : [],
+      } : null,
       fetchedAt: new Date().toISOString(),
     };
 
@@ -1166,7 +1199,7 @@ app.get('/api/v1/plots/:plotNumber', async (req, res) => {
     res.setHeader('Content-Type', 'application/json');
     res.send(jsonStr);
   } catch (error: any) {
-    console.error('[API] Error fetching plot:', error);
+    console.error('[API] Error fetching plot:', error?.message || error);
     // Return stale cache on error
     const stale = plotCache.get(parseInt(req.params.plotNumber, 10));
     if (stale) {
