@@ -131,6 +131,45 @@
     .panel-collapsed .panel-header { margin-bottom: -15px; border-radius: 12px; }
     .panel-dragging { opacity: 0.85; z-index: 1000 !important; }
 
+    #back-to-world {
+      display: none;
+      position: fixed;
+      top: 15px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 200;
+      background: linear-gradient(135deg, #7c3aed, #6d28d9);
+      color: #fff;
+      border: 1px solid rgba(167, 139, 250, 0.4);
+      border-radius: 10px;
+      padding: 10px 24px;
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      backdrop-filter: blur(10px);
+      box-shadow: 0 4px 20px rgba(124, 58, 237, 0.3);
+      transition: all 0.2s;
+    }
+    #back-to-world:hover {
+      background: linear-gradient(135deg, #8b5cf6, #7c3aed);
+      box-shadow: 0 4px 28px rgba(124, 58, 237, 0.5);
+    }
+    #plot-tooltip {
+      display: none;
+      position: fixed;
+      z-index: 200;
+      background: rgba(0, 0, 0, 0.85);
+      color: #e2e8f0;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 12px;
+      pointer-events: none;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+      backdrop-filter: blur(6px);
+      max-width: 260px;
+      white-space: nowrap;
+    }
+
     #legend {
       position: absolute;
       bottom: 10px;
@@ -968,6 +1007,9 @@
     </div>
   </div>
 
+  <button id="back-to-world">&#8592; Back to World</button>
+  <div id="plot-tooltip"></div>
+
   <div id="loading">
     Loading Real MNA Universe...
     <div class="sub">Fetching from mkpl-api.prod.myneighboralice.com</div>
@@ -1428,6 +1470,1008 @@
     let selectedMesh = null;
     let selectedLand = null;
 
+    // === 3D Plot View State ===
+    let viewMode = 'world'; // 'world' | 'plot'
+    let plotViewGroup = null;
+    let savedCameraState = null;
+    let hiddenWorldObjects = [];
+    let currentPlotData = null;
+
+    // Rotation map for placeables and nodes
+    const ROTATION_MAP = { north: 0, east: -Math.PI / 2, south: Math.PI, west: Math.PI / 2 };
+
+    // Clean name helper
+    function cleanPlaceableName(name) {
+      return name
+        .replace(/^(placeable_|equippable_|seed_|fish_|resourcenode_|craftingstation_)/, '')
+        .replace(/_/g, ' ')
+        .replace(/\b\w/g, c => c.toUpperCase());
+    }
+
+    // === TERRAIN BUILDER ===
+    function buildTerrain(mapData) {
+      const group = new THREE.Group();
+      group.name = 'terrain';
+      if (!mapData || !mapData.cells) return group;
+
+      const rawCells = mapData.cells;
+      const textureArr = mapData.texture || [];
+      const area = mapData.area || {};
+      const gridW = area.size?.width || 100;
+      const rawRows = Math.floor(rawCells.length / gridW);
+
+      // The cells array is interleaved: even rows = terrain type, odd rows = elevation
+      // 20,000 entries = 200 rows of 100 = 100x100 grid with 2 layers
+      const isInterleaved = rawRows === gridW * 2;
+      const gridH = isInterleaved ? rawRows / 2 : rawRows;
+
+      // Decode the two layers
+      const terrainType = new Array(gridW * gridH);
+      const elevation = new Array(gridW * gridH);
+
+      if (isInterleaved) {
+        for (let row = 0; row < gridH; row++) {
+          for (let x = 0; x < gridW; x++) {
+            terrainType[row * gridW + x] = rawCells[(row * 2) * gridW + x] ?? 0;
+            elevation[row * gridW + x] = rawCells[(row * 2 + 1) * gridW + x] ?? 0;
+          }
+        }
+      } else {
+        // Fallback: treat as flat type-only grid
+        for (let i = 0; i < rawCells.length; i++) {
+          terrainType[i] = rawCells[i] ?? 0;
+          elevation[i] = 0;
+        }
+      }
+
+      // Terrain type colors (from 20-plot survey of 400k cells)
+      const typeColors = {
+        0:  0x2563eb,  // deep water
+        1:  0x16a34a,  // grass
+        2:  0x92400e,  // dirt/earth
+        3:  0xeab308,  // sand
+        4:  0x4ade80,  // light grass / meadow
+        5:  0x713f12,  // dark soil / fertile
+        6:  0x78716c,  // rocky ground
+        7:  0x6b5c3e,  // mud / wetland
+        8:  0x60a5fa,  // shallow water / marsh
+        9:  0xa8a29e,  // gravel / pebbles
+        10: 0x57534e,  // cliff / stone
+        11: 0x15803d,  // dense vegetation
+        12: 0xd6b88a,  // path / road
+        13: 0x166534,  // forest floor
+        14: 0x1e3a5f,  // deep river
+        15: 0xc2b280,  // dry sand
+        16: 0x4a5568,  // dark stone
+        17: 0x8b5e3c,  // clay
+        18: 0x2d6a4f,  // moss
+        19: 0x9f7e55,  // dried earth
+        20: 0xb8c4a8,  // pale grass
+        21: 0x5c4033,  // dark rock
+        22: 0x7c9a3e,  // scrubland
+        23: 0x3a7ca5,  // pond
+        24: 0x6d6027,  // loam
+        25: 0xbfa76a,  // sandstone
+        26: 0x4a7c59,  // fern ground
+        27: 0xc9b89e,  // chalk
+        28: 0x8e735b,  // packed earth
+        29: 0x2e4057,  // slate
+        30: 0x536b4e,  // forest moss
+        31: 0xd4a76a,  // dune
+        32: 0x8b7355,  // silt
+        33: 0x5e7346,  // undergrowth
+        34: 0x3d5a80,  // tidal pool
+        35: 0xa0522d,  // red earth
+        36: 0x6b8e6b,  // meadow clover
+        37: 0x9e9e78,  // dry grass
+        38: 0x708090,  // flagstone
+        39: 0x556b2f,  // ivy ground
+        41: 0x8fbc8f,  // sage grass
+        43: 0xbc8f8f,  // rose earth
+        44: 0x696969,  // boulder
+        45: 0x4682b4,  // stream
+        46: 0x2f4f4f,  // dark cliff
+        47: 0xdaa520,  // golden sand
+        48: 0x5f9ea0,  // lagoon
+        49: 0x7b6b4a,  // peat
+        50: 0x9acd32,  // fresh sprout
+      };
+      const defaultColor = 0x888888;
+
+      // Texture overlay colors: player-placed ground decorations (paths, courtyards, zones)
+      const texOverlayColors = {
+        1: new THREE.Color(0xc9b89e),  // warm stone paving
+        2: new THREE.Color(0xd4a574),  // sandy path / border
+        3: new THREE.Color(0xa8c090),  // garden / decorative green
+      };
+      const texBlendStrength = 0.55;
+
+      // Elevation scaling: gentle terrain (raw 0-25 → 0-2.0 world units over a 100-unit grid)
+      const elevScale = 0.08;
+
+      // Build a smooth heightmap plane instead of individual boxes
+      // This gives continuous terrain with vertex coloring — 1 draw call, no gaps
+      const planeGeo = new THREE.PlaneGeometry(gridW, gridH, gridW - 1, gridH - 1);
+      planeGeo.rotateX(-Math.PI / 2); // lay flat (XZ plane)
+
+      const positions = planeGeo.attributes.position;
+      const colors = new Float32Array(positions.count * 3);
+
+      for (let i = 0; i < positions.count; i++) {
+        // PlaneGeometry vertices go left→right, top→bottom after rotation
+        // Map vertex index to grid cell
+        const gx = i % gridW;
+        const gz = Math.floor(i / gridW);
+        const cellIdx = gz * gridW + gx;
+
+        // Displace Y by elevation
+        const elev = (cellIdx < elevation.length ? elevation[cellIdx] : 0) * elevScale;
+        positions.setY(i, elev);
+
+        // Shift so grid goes from 0..gridW-1 (centered at gridW/2)
+        positions.setX(i, gx);
+        positions.setZ(i, gz);
+
+        // Vertex color: terrain type + texture blend
+        const t = cellIdx < terrainType.length ? terrainType[cellIdx] : 0;
+        const tex = (textureArr.length > 0 && cellIdx < textureArr.length) ? textureArr[cellIdx] : 0;
+        const c = new THREE.Color(typeColors[t] ?? defaultColor);
+        if (tex > 0 && texOverlayColors[tex]) {
+          c.lerp(texOverlayColors[tex], texBlendStrength);
+        }
+        colors[i * 3] = c.r;
+        colors[i * 3 + 1] = c.g;
+        colors[i * 3 + 2] = c.b;
+      }
+
+      // Smooth vertex colors: multiple passes of box blur to soften harsh terrain banding
+      // Each pass averages with 8 neighbors (cardinal + diagonal)
+      let src = colors;
+      const SMOOTH_PASSES = 3;
+      for (let pass = 0; pass < SMOOTH_PASSES; pass++) {
+        const dst = new Float32Array(src.length);
+        for (let i = 0; i < positions.count; i++) {
+          const gx = i % gridW;
+          const gz = Math.floor(i / gridW);
+          let r = src[i*3] * 2, g = src[i*3+1] * 2, b = src[i*3+2] * 2; // center weighted 2x
+          let weight = 2;
+          for (let dz = -1; dz <= 1; dz++) {
+            for (let dx = -1; dx <= 1; dx++) {
+              if (dx === 0 && dz === 0) continue;
+              const nx = gx + dx, nz = gz + dz;
+              if (nx >= 0 && nx < gridW && nz >= 0 && nz < gridH) {
+                const ni = nz * gridW + nx;
+                const w = (dx === 0 || dz === 0) ? 1.0 : 0.7; // diagonals weighted less
+                r += src[ni*3] * w; g += src[ni*3+1] * w; b += src[ni*3+2] * w;
+                weight += w;
+              }
+            }
+          }
+          dst[i*3] = r / weight;
+          dst[i*3+1] = g / weight;
+          dst[i*3+2] = b / weight;
+        }
+        src = dst;
+      }
+
+      planeGeo.setAttribute('color', new THREE.BufferAttribute(src, 3));
+      planeGeo.computeVertexNormals();
+      positions.needsUpdate = true;
+
+      const planeMat = new THREE.MeshPhongMaterial({
+        vertexColors: true,
+        flatShading: false,
+        shininess: 10,
+      });
+      const planeMesh = new THREE.Mesh(planeGeo, planeMat);
+      planeMesh.name = 'terrain_plane';
+      planeMesh.receiveShadow = true;
+      group.add(planeMesh);
+
+      // Add terrain skirt: walls around the edges so the thin plane isn't visible from the side
+      const skirtDepth = 3;
+      const skirtMat = new THREE.MeshPhongMaterial({ color: 0x3d3530 });
+      // 4 sides: front (z=0), back (z=gridH-1), left (x=0), right (x=gridW-1)
+      const sides = [
+        { axis: 'z', val: 0, len: gridW, getElev: (i) => elevation[i] },                           // front
+        { axis: 'z', val: gridH - 1, len: gridW, getElev: (i) => elevation[(gridH-1)*gridW + i] }, // back
+        { axis: 'x', val: 0, len: gridH, getElev: (i) => elevation[i * gridW] },                   // left
+        { axis: 'x', val: gridW - 1, len: gridH, getElev: (i) => elevation[i * gridW + gridW - 1] }, // right
+      ];
+      for (const side of sides) {
+        const geo = new THREE.BufferGeometry();
+        const verts = [];
+        for (let i = 0; i < side.len; i++) {
+          const elev = (side.getElev(i) || 0) * elevScale;
+          const bottom = elev - skirtDepth;
+          if (side.axis === 'z') {
+            verts.push(i, elev, side.val,   i, bottom, side.val,   i+1, elev, side.val);
+            verts.push(i+1, elev, side.val,  i, bottom, side.val,   i+1, bottom, side.val);
+          } else {
+            verts.push(side.val, elev, i,   side.val, bottom, i,   side.val, elev, i+1);
+            verts.push(side.val, elev, i+1,  side.val, bottom, i,   side.val, bottom, i+1);
+          }
+        }
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(verts, 3));
+        geo.computeVertexNormals();
+        const mesh = new THREE.Mesh(geo, skirtMat);
+        mesh.name = 'terrain_skirt';
+        group.add(mesh);
+      }
+
+      // Store cell type/texture info for tooltip raycasting
+      group.userData.terrainType = terrainType;
+      group.userData.textureArr = textureArr;
+
+      // Store grid dimensions and elevation data for other builders
+      group.userData.gridW = gridW;
+      group.userData.gridH = gridH;
+      group.userData.elevation = elevation;
+      group.userData.texture = textureArr;
+      return group;
+    }
+
+    // === PLACEABLE BUILDER ===
+    function buildPlaceables(placed, getElev) {
+      const group = new THREE.Group();
+      group.name = 'placeables';
+      if (!placed || !Array.isArray(placed)) return group;
+
+      for (const item of placed) {
+        const name = (item.name || item.template_name || item.prototype_name || '').toLowerCase();
+        // Position is nested in places[0] from the blockchain
+        const place = item.places?.[0] || {};
+        const loc = place.location || item.location || {};
+        const x = loc.x ?? 0;
+        const z = loc.y ?? 0;
+        const rot = ROTATION_MAP[place.grid_rotation || item.grid_rotation] || 0;
+
+        // Compute footprint from relative_locations
+        const rels = item.relative_locations || [{ x: 0, y: 0 }];
+        let minX = Infinity, maxX = -Infinity, minZ = Infinity, maxZ = -Infinity;
+        for (const r of rels) {
+          minX = Math.min(minX, r.x); maxX = Math.max(maxX, r.x);
+          minZ = Math.min(minZ, r.y); maxZ = Math.max(maxZ, r.y);
+        }
+        const fw = maxX - minX + 1;
+        const fd = maxZ - minZ + 1;
+
+        const obj = buildPlaceableShape(name, fw, fd);
+        const elev = getElev ? getElev(x + fw / 2 - 0.5, z + fd / 2 - 0.5) : 0;
+        obj.position.set(x + fw / 2 - 0.5, elev, z + fd / 2 - 0.5);
+        obj.rotation.y = rot;
+        obj.userData.tooltipName = cleanPlaceableName(name);
+        obj.userData.isPlotObject = true;
+        group.add(obj);
+      }
+
+      return group;
+    }
+
+    function buildPlaceableShape(name, fw, fd) {
+      const g = new THREE.Group();
+
+      if (name.includes('fence')) {
+        // Posts + rail
+        const postColor = name.includes('blue') ? 0x3b82f6 : name.includes('red') ? 0xef4444 : 0xf5f5f0;
+        const postGeo = new THREE.CylinderGeometry(0.06, 0.06, 0.7, 6);
+        const postMat = new THREE.MeshPhongMaterial({ color: 0x8B6914 });
+        const post1 = new THREE.Mesh(postGeo, postMat);
+        post1.position.set(-fw / 2 + 0.15, 0.35, 0);
+        post1.castShadow = true;
+        g.add(post1);
+        const post2 = new THREE.Mesh(postGeo, postMat);
+        post2.position.set(fw / 2 - 0.15, 0.35, 0);
+        post2.castShadow = true;
+        g.add(post2);
+        const railGeo = new THREE.BoxGeometry(fw - 0.3, 0.06, 0.06);
+        const railMat = new THREE.MeshPhongMaterial({ color: postColor });
+        const rail1 = new THREE.Mesh(railGeo, railMat);
+        rail1.position.set(0, 0.5, 0);
+        g.add(rail1);
+        const rail2 = new THREE.Mesh(railGeo, railMat);
+        rail2.position.set(0, 0.25, 0);
+        g.add(rail2);
+      } else if (name.includes('wall_barrier') || name.includes('wallbarrier')) {
+        const wallGeo = new THREE.BoxGeometry(fw * 0.9, 0.8, fd * 0.3);
+        const wallMat = new THREE.MeshPhongMaterial({ color: 0x9ca3af });
+        const wall = new THREE.Mesh(wallGeo, wallMat);
+        wall.position.y = 0.4;
+        wall.castShadow = true;
+        g.add(wall);
+      } else if (name.includes('wall_pillar') || name.includes('wallpillar')) {
+        const pillarGeo = new THREE.CylinderGeometry(0.15, 0.18, 1.0, 8);
+        const pillarMat = new THREE.MeshPhongMaterial({ color: 0x9ca3af });
+        const pillar = new THREE.Mesh(pillarGeo, pillarMat);
+        pillar.position.y = 0.5;
+        pillar.castShadow = true;
+        g.add(pillar);
+        const capGeo = new THREE.BoxGeometry(0.4, 0.08, 0.4);
+        const cap = new THREE.Mesh(capGeo, pillarMat);
+        cap.position.y = 1.04;
+        g.add(cap);
+      } else if (name.includes('craftingstation')) {
+        // Table base
+        const tableGeo = new THREE.BoxGeometry(fw * 0.8, 0.5, fd * 0.8);
+        const tableMat = new THREE.MeshPhongMaterial({ color: 0x92400e });
+        const table = new THREE.Mesh(tableGeo, tableMat);
+        table.position.y = 0.25;
+        table.castShadow = true;
+        g.add(table);
+        // Top accessory
+        if (name.includes('tool') || name.includes('anvil')) {
+          const anvilGeo = new THREE.BoxGeometry(0.3, 0.15, 0.2);
+          const anvilMat = new THREE.MeshPhongMaterial({ color: 0x374151 });
+          const anvil = new THREE.Mesh(anvilGeo, anvilMat);
+          anvil.position.y = 0.58;
+          g.add(anvil);
+        } else if (name.includes('dispenser') || name.includes('seed')) {
+          const cylGeo = new THREE.CylinderGeometry(0.12, 0.12, 0.25, 8);
+          const cylMat = new THREE.MeshPhongMaterial({ color: 0x059669 });
+          const cyl = new THREE.Mesh(cylGeo, cylMat);
+          cyl.position.y = 0.63;
+          g.add(cyl);
+        } else {
+          const topGeo = new THREE.BoxGeometry(0.35, 0.1, 0.35);
+          const topMat = new THREE.MeshPhongMaterial({ color: 0xb45309 });
+          const top = new THREE.Mesh(topGeo, topMat);
+          top.position.y = 0.55;
+          g.add(top);
+        }
+      } else if (name.includes('homestead') || name.includes('house')) {
+        // House base
+        const baseGeo = new THREE.BoxGeometry(fw * 0.85, 1.0, fd * 0.85);
+        const baseMat = new THREE.MeshPhongMaterial({ color: 0xf5deb3 });
+        const base = new THREE.Mesh(baseGeo, baseMat);
+        base.position.y = 0.5;
+        base.castShadow = true;
+        g.add(base);
+        // Roof
+        const roofGeo = new THREE.ConeGeometry(Math.max(fw, fd) * 0.6, 0.6, 4);
+        const roofMat = new THREE.MeshPhongMaterial({ color: 0x8B0000 });
+        const roof = new THREE.Mesh(roofGeo, roofMat);
+        roof.position.y = 1.3;
+        roof.rotation.y = Math.PI / 4;
+        roof.castShadow = true;
+        g.add(roof);
+        // Door
+        const doorGeo = new THREE.BoxGeometry(0.2, 0.4, 0.05);
+        const doorMat = new THREE.MeshPhongMaterial({ color: 0x5c3317 });
+        const door = new THREE.Mesh(doorGeo, doorMat);
+        door.position.set(0, 0.2, fd * 0.43);
+        g.add(door);
+        // Chimney
+        const chimGeo = new THREE.CylinderGeometry(0.08, 0.08, 0.4, 6);
+        const chimMat = new THREE.MeshPhongMaterial({ color: 0x6b7280 });
+        const chim = new THREE.Mesh(chimGeo, chimMat);
+        chim.position.set(fw * 0.25, 1.5, -fd * 0.15);
+        g.add(chim);
+      } else if (name.includes('tree') || name.includes('bush')) {
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.08, 0.12, 0.6, 6),
+          new THREE.MeshPhongMaterial({ color: 0x8B4513 })
+        );
+        trunk.position.y = 0.3;
+        trunk.castShadow = true;
+        g.add(trunk);
+        const canopy = new THREE.Mesh(
+          new THREE.IcosahedronGeometry(name.includes('bush') ? 0.3 : 0.45, 1),
+          new THREE.MeshPhongMaterial({ color: 0x228B22 })
+        );
+        canopy.position.y = name.includes('bush') ? 0.5 : 0.85;
+        canopy.castShadow = true;
+        g.add(canopy);
+      } else if (name.includes('lamp') || name.includes('lantern')) {
+        const poleGeo = new THREE.CylinderGeometry(0.03, 0.04, 0.9, 6);
+        const poleMat = new THREE.MeshPhongMaterial({ color: 0x374151 });
+        const pole = new THREE.Mesh(poleGeo, poleMat);
+        pole.position.y = 0.45;
+        pole.castShadow = true;
+        g.add(pole);
+        const bulbGeo = new THREE.SphereGeometry(0.1, 8, 8);
+        const bulbMat = new THREE.MeshPhongMaterial({ color: 0xfef08a, emissive: 0xfbbf24, emissiveIntensity: 0.6 });
+        const bulb = new THREE.Mesh(bulbGeo, bulbMat);
+        bulb.position.y = 0.95;
+        g.add(bulb);
+      } else if (name.includes('storage') || name.includes('chest')) {
+        const chestGeo = new THREE.BoxGeometry(fw * 0.7, 0.35, fd * 0.5);
+        const chestMat = new THREE.MeshPhongMaterial({ color: 0x92400e });
+        const chest = new THREE.Mesh(chestGeo, chestMat);
+        chest.position.y = 0.175;
+        chest.castShadow = true;
+        g.add(chest);
+        const lidGeo = new THREE.BoxGeometry(fw * 0.72, 0.04, fd * 0.12);
+        const lidMat = new THREE.MeshPhongMaterial({ color: 0xb45309 });
+        const lid = new THREE.Mesh(lidGeo, lidMat);
+        lid.position.set(0, 0.36, 0);
+        g.add(lid);
+      } else {
+        // Default colored box
+        const boxGeo = new THREE.BoxGeometry(fw * 0.8, 0.5, fd * 0.8);
+        // Deterministic color from name
+        const hash = name.split('').reduce((a, c) => a + c.charCodeAt(0), 0);
+        const hue = (hash * 137) % 360;
+        const color = new THREE.Color().setHSL(hue / 360, 0.5, 0.45);
+        const boxMat = new THREE.MeshPhongMaterial({ color });
+        const box = new THREE.Mesh(boxGeo, boxMat);
+        box.position.y = 0.25;
+        box.castShadow = true;
+        g.add(box);
+      }
+
+      return g;
+    }
+
+    // === FARMING BUILDER ===
+    function buildFarming(farmingCells, getElev) {
+      const group = new THREE.Group();
+      group.name = 'farming';
+      if (!farmingCells || !Array.isArray(farmingCells)) return group;
+
+      // Group by visual state
+      const tilled = [];
+      const growing = [];
+      const mature = [];
+
+      for (const cell of farmingCells) {
+        const loc = cell.location || {};
+        const gx = loc.x ?? 0;
+        const gz = loc.y ?? 0;
+        const cropName = cell.plant?.name ? cell.plant.name.replace(/^seed_/, '').replace(/_/g, ' ') : '';
+        const entry = { x: gx, z: gz, elev: getElev ? getElev(gx, gz) : 0, cell, cropName };
+        if (cell.plant && cell.current_state === 'mature') {
+          mature.push(entry);
+        } else if (cell.plant) {
+          // Both 'planted' and 'growing' states show as growing
+          growing.push(entry);
+        } else {
+          tilled.push(entry);
+        }
+      }
+
+      const dummy = new THREE.Object3D();
+
+      // Tilled soil (empty)
+      if (tilled.length > 0) {
+        const geo = new THREE.BoxGeometry(0.8, 0.05, 0.8);
+        const mat = new THREE.MeshPhongMaterial({ color: 0x5c3317 });
+        const mesh = new THREE.InstancedMesh(geo, mat, tilled.length);
+        mesh.name = 'farming_tilled';
+        tilled.forEach((t, i) => {
+          dummy.position.set(t.x, t.elev + 0.025, t.z);
+          dummy.updateMatrix();
+          mesh.setMatrixAt(i, dummy.matrix);
+        });
+        mesh.instanceMatrix.needsUpdate = true;
+        mesh.receiveShadow = true;
+        group.add(mesh);
+      }
+
+      // Growing (soil + small green sprout)
+      if (growing.length > 0) {
+        // Soil
+        const soilGeo = new THREE.BoxGeometry(0.8, 0.05, 0.8);
+        const soilMat = new THREE.MeshPhongMaterial({ color: 0x5c3317 });
+        const soilMesh = new THREE.InstancedMesh(soilGeo, soilMat, growing.length);
+        soilMesh.name = 'farming_growing_soil';
+        growing.forEach((t, i) => {
+          dummy.position.set(t.x, t.elev + 0.025, t.z);
+          dummy.updateMatrix();
+          soilMesh.setMatrixAt(i, dummy.matrix);
+        });
+        soilMesh.instanceMatrix.needsUpdate = true;
+        soilMesh.receiveShadow = true;
+        group.add(soilMesh);
+
+        // Sprouts
+        const sproutGeo = new THREE.CylinderGeometry(0.04, 0.04, 0.25, 6);
+        const sproutMat = new THREE.MeshPhongMaterial({ color: 0x22c55e });
+        const sproutMesh = new THREE.InstancedMesh(sproutGeo, sproutMat, growing.length);
+        sproutMesh.name = 'farming_growing_sprout';
+        growing.forEach((t, i) => {
+          dummy.position.set(t.x, t.elev + 0.175, t.z);
+          dummy.updateMatrix();
+          sproutMesh.setMatrixAt(i, dummy.matrix);
+        });
+        sproutMesh.instanceMatrix.needsUpdate = true;
+        sproutMesh.castShadow = true;
+        group.add(sproutMesh);
+      }
+
+      // Mature (soil + tall plant + fruit sphere)
+      if (mature.length > 0) {
+        // Soil
+        const soilGeo = new THREE.BoxGeometry(0.8, 0.05, 0.8);
+        const soilMat = new THREE.MeshPhongMaterial({ color: 0x5c3317 });
+        const soilMesh = new THREE.InstancedMesh(soilGeo, soilMat, mature.length);
+        soilMesh.name = 'farming_mature_soil';
+        mature.forEach((t, i) => {
+          dummy.position.set(t.x, t.elev + 0.025, t.z);
+          dummy.updateMatrix();
+          soilMesh.setMatrixAt(i, dummy.matrix);
+        });
+        soilMesh.instanceMatrix.needsUpdate = true;
+        soilMesh.receiveShadow = true;
+        group.add(soilMesh);
+
+        // Stems
+        const stemGeo = new THREE.CylinderGeometry(0.04, 0.05, 0.45, 6);
+        const stemMat = new THREE.MeshPhongMaterial({ color: 0x16a34a });
+        const stemMesh = new THREE.InstancedMesh(stemGeo, stemMat, mature.length);
+        stemMesh.name = 'farming_mature_stem';
+        mature.forEach((t, i) => {
+          dummy.position.set(t.x, t.elev + 0.275, t.z);
+          dummy.updateMatrix();
+          stemMesh.setMatrixAt(i, dummy.matrix);
+        });
+        stemMesh.instanceMatrix.needsUpdate = true;
+        stemMesh.castShadow = true;
+        group.add(stemMesh);
+
+        // Fruits
+        const fruitGeo = new THREE.SphereGeometry(0.1, 8, 8);
+        const fruitMat = new THREE.MeshPhongMaterial({ color: 0xef4444 });
+        const fruitMesh = new THREE.InstancedMesh(fruitGeo, fruitMat, mature.length);
+        fruitMesh.name = 'farming_mature_fruit';
+        mature.forEach((t, i) => {
+          dummy.position.set(t.x, t.elev + 0.55, t.z);
+          dummy.updateMatrix();
+          fruitMesh.setMatrixAt(i, dummy.matrix);
+        });
+        fruitMesh.instanceMatrix.needsUpdate = true;
+        fruitMesh.castShadow = true;
+        group.add(fruitMesh);
+      }
+
+      return group;
+    }
+
+    // === RESOURCE NODE BUILDER ===
+    function buildResourceNodes(nodes, getElev) {
+      const group = new THREE.Group();
+      group.name = 'resourceNodes';
+      if (!nodes || !Array.isArray(nodes)) return group;
+
+      for (const node of nodes) {
+        const proto = (node.node_prototype_name || '').toLowerCase();
+        const loc = node.location || {};
+        const x = loc.x ?? 0;
+        const z = loc.y ?? 0;
+        const rot = ROTATION_MAP[node.rotation] || 0;
+
+        // Parse type and tier: resourcenode_{type}_t{tier} or economynode_{type}
+        const resMatch = proto.match(/resourcenode_(\w+?)_t(\d+)/);
+        const econMatch = proto.match(/economynode_(\w+)/);
+
+        let obj, tooltipName;
+        if (resMatch) {
+          const type = resMatch[1];
+          const tier = parseInt(resMatch[2]);
+          const scale = tier === 1 ? 0.7 : tier === 2 ? 1.0 : 1.3;
+          obj = buildNodeShape(type, scale);
+          tooltipName = `${type.charAt(0).toUpperCase() + type.slice(1)} T${tier}`;
+        } else if (econMatch) {
+          const econType = econMatch[1];
+          obj = buildEconomyNodeShape(econType);
+          tooltipName = `${econType.charAt(0).toUpperCase() + econType.slice(1)} Spot`;
+        } else {
+          obj = buildNodeShape('unknown', 0.7);
+          tooltipName = proto || 'Unknown Node';
+        }
+
+        const elev = getElev ? getElev(x, z) : 0;
+        obj.position.set(x, elev, z);
+        obj.rotation.y = rot;
+        obj.userData.tooltipName = tooltipName;
+        obj.userData.isPlotObject = true;
+        group.add(obj);
+      }
+
+      return group;
+    }
+
+    function buildNodeShape(type, scale) {
+      const g = new THREE.Group();
+
+      if (type === 'wood') {
+        const trunk = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.1 * scale, 0.15 * scale, 0.8 * scale, 6),
+          new THREE.MeshPhongMaterial({ color: 0x8B4513 })
+        );
+        trunk.position.y = 0.4 * scale;
+        trunk.castShadow = true;
+        g.add(trunk);
+        const canopy = new THREE.Mesh(
+          new THREE.ConeGeometry(0.35 * scale, 0.7 * scale, 8),
+          new THREE.MeshPhongMaterial({ color: 0x14532d })
+        );
+        canopy.position.y = 1.0 * scale;
+        canopy.castShadow = true;
+        g.add(canopy);
+      } else if (type === 'stone') {
+        const rock = new THREE.Mesh(
+          new THREE.DodecahedronGeometry(0.3 * scale, 0),
+          new THREE.MeshPhongMaterial({ color: 0x9ca3af, flatShading: true })
+        );
+        rock.position.y = 0.25 * scale;
+        rock.castShadow = true;
+        g.add(rock);
+      } else if (type === 'ore') {
+        const crystal = new THREE.Mesh(
+          new THREE.OctahedronGeometry(0.25 * scale, 0),
+          new THREE.MeshPhongMaterial({ color: 0x475569, flatShading: true, shininess: 80 })
+        );
+        crystal.position.y = 0.3 * scale;
+        crystal.rotation.set(0.2, 0.4, 0.1);
+        crystal.castShadow = true;
+        g.add(crystal);
+      } else if (type === 'fiber') {
+        // Cluster of thin reeds
+        for (let i = 0; i < 5; i++) {
+          const reed = new THREE.Mesh(
+            new THREE.CylinderGeometry(0.02 * scale, 0.03 * scale, 0.5 * scale, 4),
+            new THREE.MeshPhongMaterial({ color: 0x86efac })
+          );
+          const angle = (i / 5) * Math.PI * 2;
+          reed.position.set(
+            Math.cos(angle) * 0.1 * scale,
+            0.25 * scale,
+            Math.sin(angle) * 0.1 * scale
+          );
+          reed.rotation.x = (Math.random() - 0.5) * 0.15;
+          reed.rotation.z = (Math.random() - 0.5) * 0.15;
+          reed.castShadow = true;
+          g.add(reed);
+        }
+      } else if (type === 'sediment') {
+        const mound = new THREE.Mesh(
+          new THREE.BoxGeometry(0.5 * scale, 0.15 * scale, 0.5 * scale),
+          new THREE.MeshPhongMaterial({ color: 0xd4a574 })
+        );
+        mound.position.y = 0.075 * scale;
+        mound.receiveShadow = true;
+        g.add(mound);
+      } else {
+        // Unknown type — small sphere
+        const orb = new THREE.Mesh(
+          new THREE.SphereGeometry(0.2 * scale, 8, 8),
+          new THREE.MeshPhongMaterial({ color: 0xfbbf24 })
+        );
+        orb.position.y = 0.2 * scale;
+        g.add(orb);
+      }
+
+      return g;
+    }
+
+    function buildEconomyNodeShape(econType) {
+      const g = new THREE.Group();
+      if (econType === 'fishing') {
+        // Fishing spot: small dock/pier + water ripple
+        const pier = new THREE.Mesh(
+          new THREE.BoxGeometry(0.6, 0.08, 0.3),
+          new THREE.MeshPhongMaterial({ color: 0x8B6914 })
+        );
+        pier.position.y = 0.15;
+        g.add(pier);
+        const post = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.03, 0.03, 0.5, 6),
+          new THREE.MeshPhongMaterial({ color: 0x8B4513 })
+        );
+        post.position.set(0.2, 0.35, 0);
+        g.add(post);
+        // Fishing line
+        const line = new THREE.Mesh(
+          new THREE.CylinderGeometry(0.005, 0.005, 0.3, 4),
+          new THREE.MeshPhongMaterial({ color: 0xcccccc })
+        );
+        line.position.set(0.25, 0.2, 0.1);
+        line.rotation.z = 0.8;
+        g.add(line);
+        // Water ripple ring
+        const ring = new THREE.Mesh(
+          new THREE.RingGeometry(0.15, 0.2, 16),
+          new THREE.MeshPhongMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.4, side: THREE.DoubleSide })
+        );
+        ring.rotation.x = -Math.PI / 2;
+        ring.position.set(0, 0.02, 0);
+        g.add(ring);
+      } else if (econType === 'farming') {
+        // Farming spot: soil patch with seed bag
+        const soil = new THREE.Mesh(
+          new THREE.BoxGeometry(0.7, 0.06, 0.7),
+          new THREE.MeshPhongMaterial({ color: 0x5c3317 })
+        );
+        soil.position.y = 0.03;
+        g.add(soil);
+        const bag = new THREE.Mesh(
+          new THREE.BoxGeometry(0.15, 0.2, 0.1),
+          new THREE.MeshPhongMaterial({ color: 0xd4a574 })
+        );
+        bag.position.set(0.2, 0.13, 0.2);
+        g.add(bag);
+      } else if (econType === 'crafting') {
+        // Crafting spot: workbench with tools
+        const bench = new THREE.Mesh(
+          new THREE.BoxGeometry(0.6, 0.4, 0.4),
+          new THREE.MeshPhongMaterial({ color: 0x92400e })
+        );
+        bench.position.y = 0.2;
+        g.add(bench);
+        const anvil = new THREE.Mesh(
+          new THREE.BoxGeometry(0.2, 0.12, 0.15),
+          new THREE.MeshPhongMaterial({ color: 0x4b5563 })
+        );
+        anvil.position.set(0, 0.46, 0);
+        g.add(anvil);
+      } else {
+        // Generic economy node
+        const orb = new THREE.Mesh(
+          new THREE.SphereGeometry(0.2, 8, 8),
+          new THREE.MeshPhongMaterial({ color: 0xfbbf24, emissive: 0xfbbf24, emissiveIntensity: 0.3 })
+        );
+        orb.position.y = 0.2;
+        g.add(orb);
+      }
+      return g;
+    }
+
+    // === ENTER PLOT VIEW ===
+    function enterPlotView(data, land) {
+      if (viewMode === 'plot') exitPlotView();
+      viewMode = 'plot';
+      currentPlotData = data;
+
+      // Save camera state
+      savedCameraState = {
+        position: camera.position.clone(),
+        target: controls.target.clone(),
+        minDist: controls.minDistance,
+        maxDist: controls.maxDistance,
+        maxPolar: controls.maxPolarAngle,
+      };
+
+      // Hide all world objects (keep sky, lights, stars)
+      hiddenWorldObjects = [];
+      scene.children.forEach(child => {
+        if (child === sky || child === stars || child instanceof THREE.Light) return;
+        if (child.visible) {
+          hiddenWorldObjects.push(child);
+          child.visible = false;
+        }
+      });
+
+      // Build plot scene
+      plotViewGroup = new THREE.Group();
+      plotViewGroup.name = 'plotView';
+
+      const terrain = buildTerrain(data.map);
+      plotViewGroup.add(terrain);
+      const elevData = terrain.userData.elevation;
+      const tGridW = terrain.userData.gridW || 100;
+      const elevScale = 0.08;
+      const getElev = (gx, gz) => {
+        const idx = Math.floor(gz) * tGridW + Math.floor(gx);
+        return (elevData && idx >= 0 && idx < elevData.length) ? elevData[idx] * elevScale : 0;
+      };
+      plotViewGroup.add(buildPlaceables(data.placeables?.placed, getElev));
+      plotViewGroup.add(buildFarming(data.farming, getElev));
+      plotViewGroup.add(buildResourceNodes(data.nodes, getElev));
+
+      scene.add(plotViewGroup);
+
+      // Camera: isometric view over plot center
+      const gridW = terrain.userData.gridW || 100;
+      const gridH = terrain.userData.gridH || 200;
+      const centerX = gridW / 2;
+      const centerZ = gridH / 2;
+      const extent = Math.max(gridW, gridH);
+
+      // Adjust controls for plot view
+      controls.minDistance = 10;
+      controls.maxDistance = extent * 1.5;
+      controls.maxPolarAngle = Math.PI / 2.05;
+
+      // Animate camera
+      const startPos = camera.position.clone();
+      const startTarget = controls.target.clone();
+      const endTarget = new THREE.Vector3(centerX, 0, centerZ);
+      const endPos = new THREE.Vector3(centerX + extent * 0.4, extent * 0.35, centerZ + extent * 0.4);
+      const duration = 800;
+      const startTime = Date.now();
+
+      function animateIn() {
+        const elapsed = Date.now() - startTime;
+        const t = Math.min(elapsed / duration, 1);
+        const eased = 1 - Math.pow(1 - t, 3);
+        camera.position.lerpVectors(startPos, endPos, eased);
+        controls.target.lerpVectors(startTarget, endTarget, eased);
+        if (t < 1) requestAnimationFrame(animateIn);
+      }
+      animateIn();
+
+      // Show back button, hide world UI
+      document.getElementById('back-to-world').style.display = 'block';
+      document.getElementById('info').style.display = 'none';
+      document.getElementById('stats').style.display = 'none';
+      document.getElementById('legend').style.display = 'none';
+      document.getElementById('land-info').style.display = 'none';
+      const chainStats = document.getElementById('chain-stats');
+      if (chainStats) chainStats.style.display = 'none';
+      const storefront = document.getElementById('storefront');
+      if (storefront) storefront.style.display = 'none';
+      const fieldGuide = document.getElementById('field-guide');
+      if (fieldGuide) fieldGuide.style.display = 'none';
+      const leaderboard = document.getElementById('leaderboard');
+      if (leaderboard) leaderboard.style.display = 'none';
+      const playerSearch = document.getElementById('player-search');
+      if (playerSearch) playerSearch.style.display = 'none';
+    }
+
+    // === EXIT PLOT VIEW ===
+    function exitPlotView() {
+      if (viewMode !== 'plot') return;
+
+      // Remove and dispose plot group
+      if (plotViewGroup) {
+        plotViewGroup.traverse(child => {
+          if (child.geometry) child.geometry.dispose();
+          if (child.material) {
+            if (Array.isArray(child.material)) child.material.forEach(m => m.dispose());
+            else child.material.dispose();
+          }
+        });
+        scene.remove(plotViewGroup);
+        plotViewGroup = null;
+      }
+
+      // Restore world objects
+      hiddenWorldObjects.forEach(obj => { obj.visible = true; });
+      hiddenWorldObjects = [];
+
+      // Restore camera
+      if (savedCameraState) {
+        const startPos = camera.position.clone();
+        const startTarget = controls.target.clone();
+        const duration = 800;
+        const startTime = Date.now();
+
+        controls.minDistance = savedCameraState.minDist;
+        controls.maxDistance = savedCameraState.maxDist;
+        controls.maxPolarAngle = savedCameraState.maxPolar;
+
+        function animateOut() {
+          const elapsed = Date.now() - startTime;
+          const t = Math.min(elapsed / duration, 1);
+          const eased = 1 - Math.pow(1 - t, 3);
+          camera.position.lerpVectors(startPos, savedCameraState.position, eased);
+          controls.target.lerpVectors(startTarget, savedCameraState.target, eased);
+          if (t < 1) requestAnimationFrame(animateOut);
+        }
+        animateOut();
+        savedCameraState = null;
+      }
+
+      viewMode = 'world';
+      currentPlotData = null;
+
+      // Restore world UI
+      document.getElementById('back-to-world').style.display = 'none';
+      document.getElementById('plot-tooltip').style.display = 'none';
+      document.getElementById('info').style.display = 'block';
+      document.getElementById('stats').style.display = 'block';
+      document.getElementById('legend').style.display = 'block';
+      if (selectedLand) document.getElementById('land-info').style.display = 'block';
+      const chainStats = document.getElementById('chain-stats');
+      if (chainStats) chainStats.style.display = 'block';
+      const storefront = document.getElementById('storefront');
+      if (storefront) storefront.style.display = 'block';
+      const fieldGuide = document.getElementById('field-guide');
+      if (fieldGuide) fieldGuide.style.display = 'block';
+      const leaderboard = document.getElementById('leaderboard');
+      if (leaderboard) leaderboard.style.display = 'block';
+      const playerSearch = document.getElementById('player-search');
+      if (playerSearch) playerSearch.style.display = 'block';
+    }
+
+    // Back button
+    document.getElementById('back-to-world').addEventListener('click', exitPlotView);
+
+    // === PLOT VIEW HOVER TOOLTIP ===
+    window.addEventListener('mousemove', (event) => {
+      if (viewMode !== 'plot' || !plotViewGroup) return;
+
+      mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+      mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+      raycaster.setFromCamera(mouse, camera);
+
+      const intersects = raycaster.intersectObjects(plotViewGroup.children, true);
+      const tooltip = document.getElementById('plot-tooltip');
+
+      // Walk up to find a group with tooltipName
+      const terrainTypeMap = {
+        0: 'Deep Water', 1: 'Grass', 2: 'Dirt', 3: 'Sand', 4: 'Meadow', 5: 'Fertile Soil',
+        6: 'Rocky Ground', 7: 'Mud', 8: 'Shallow Water', 9: 'Gravel', 10: 'Stone',
+        11: 'Dense Vegetation', 12: 'Path', 13: 'Forest Floor', 14: 'Deep River',
+        15: 'Dry Sand', 16: 'Dark Stone', 17: 'Clay', 18: 'Moss', 19: 'Dried Earth',
+        20: 'Pale Grass', 21: 'Dark Rock', 22: 'Scrubland', 23: 'Pond', 24: 'Loam',
+        25: 'Sandstone', 26: 'Fern Ground', 27: 'Chalk', 28: 'Packed Earth', 29: 'Slate',
+        30: 'Forest Moss', 31: 'Dune', 32: 'Silt', 33: 'Undergrowth', 34: 'Tidal Pool',
+        35: 'Red Earth', 36: 'Clover', 37: 'Dry Grass', 38: 'Flagstone', 39: 'Ivy Ground',
+        41: 'Sage Grass', 43: 'Rose Earth', 44: 'Boulder', 45: 'Stream', 46: 'Dark Cliff',
+        47: 'Golden Sand', 48: 'Lagoon', 49: 'Peat', 50: 'Fresh Sprout',
+      };
+      const texTypeNames = { 1: 'Paved', 2: 'Path', 3: 'Garden' };
+
+      let name = null;
+      for (const hit of intersects) {
+        let obj = hit.object;
+        while (obj) {
+          if (obj.userData && obj.userData.tooltipName) {
+            name = obj.userData.tooltipName;
+            break;
+          }
+          // Check terrain plane — use hit point to find grid cell
+          if (obj.name === 'terrain_plane' && hit.point) {
+            const gx = Math.round(hit.point.x);
+            const gz = Math.round(hit.point.z);
+            const terrainGroup = plotViewGroup.children.find(c => c.name === 'terrain');
+            if (terrainGroup && terrainGroup.userData.terrainType) {
+              const gw = terrainGroup.userData.gridW || 100;
+              const cellIdx = gz * gw + gx;
+              const tType = terrainGroup.userData.terrainType;
+              const tTex = terrainGroup.userData.textureArr;
+              if (cellIdx >= 0 && cellIdx < tType.length) {
+                const typeNum = tType[cellIdx];
+                const texNum = (tTex && cellIdx < tTex.length) ? tTex[cellIdx] : 0;
+                const terrainName = terrainTypeMap[typeNum] || `Terrain ${typeNum}`;
+                name = texNum > 0 ? `${terrainName} (${texTypeNames[texNum] || 'Decorated'})` : terrainName;
+              }
+            }
+            if (!name) name = 'Terrain';
+            break;
+          }
+          if (obj.name && obj.name.startsWith('farming_')) {
+            // Try to get crop info from the farming data
+            if (obj.name.includes('mature')) {
+              name = 'Mature Crop';
+            } else if (obj.name.includes('growing')) {
+              name = 'Growing Crop';
+            } else {
+              name = 'Tilled Soil';
+            }
+            // Enhance with grid position if possible
+            if (hit.instanceId !== undefined && currentPlotData?.farming) {
+              const state = obj.name.includes('mature') ? 'mature' : obj.name.includes('growing') ? 'growing' : 'tilled';
+              const cells = (currentPlotData.farming || []).filter(c => {
+                if (state === 'mature') return c.plant && c.current_state === 'mature';
+                if (state === 'growing') return c.plant && c.current_state !== 'mature';
+                return !c.plant;
+              });
+              if (cells[hit.instanceId]) {
+                const cell = cells[hit.instanceId];
+                const cropName = cell.plant?.name ? cell.plant.name.replace(/^seed_/, '').replace(/_/g, ' ') : '';
+                if (cropName) name = `${name}: ${cropName}`;
+                if (cell.fertile) name += ' (fertile)';
+              }
+            }
+            break;
+          }
+          obj = obj.parent;
+        }
+        if (name) break;
+      }
+
+      if (name) {
+        tooltip.textContent = name;
+        tooltip.style.display = 'block';
+        tooltip.style.left = (event.clientX + 14) + 'px';
+        tooltip.style.top = (event.clientY + 14) + 'px';
+      } else {
+        tooltip.style.display = 'none';
+      }
+    });
+
     // Zoom to a specific land
     function zoomToLand(land) {
       if (!land) return;
@@ -1478,6 +2522,7 @@
 
 
     function onMouseClick(event) {
+      if (viewMode === 'plot') return; // Ignore in plot view
       // Ignore clicks on UI panels
       if (event.target.closest('.draggable-panel') || event.target.closest('#land-info') || event.target.closest('#info') || event.target.closest('#stats')) return;
 
@@ -1558,7 +2603,8 @@
     window.addEventListener('dblclick', (event) => {
       // Cancel any pending single-click
       if (clickTimer) { clearTimeout(clickTimer); clickTimer = null; }
-      if (event.target.closest('.draggable-panel') || event.target.closest('#land-info') || event.target.closest('#info') || event.target.closest('#stats')) return;
+      if (viewMode === 'plot') return; // Ignore in plot view
+      if (event.target.closest('.draggable-panel') || event.target.closest('#land-info') || event.target.closest('#info') || event.target.closest('#stats') || event.target.closest('#back-to-world')) return;
 
       mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
       mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -1610,6 +2656,11 @@
           .then(r => r.json())
           .then(data => {
             if (!data.success) { deepDive.style.display = 'none'; return; }
+
+            // Enter 3D plot view if terrain data available
+            if (data.map && data.map.cells) {
+              enterPlotView(data, land);
+            }
 
             // Plot metadata
             if (data.meta) {
@@ -1703,10 +2754,13 @@
 
             // Terrain minimap
             if (data.map && data.map.cells) {
-              const cells = data.map.cells;
+              const rawCells = data.map.cells;
               const area = data.map.area || {};
               const gridW = area.size?.width || 100;
-              const gridH = Math.floor(cells.length / gridW) || gridW;
+              const rawRows = Math.floor(rawCells.length / gridW);
+              // Decode interleaved layers: even rows = type, odd rows = elevation
+              const isInterleaved = rawRows === gridW * 2;
+              const gridH = isInterleaved ? rawRows / 2 : rawRows;
               const canvasW = 150;
               const canvasH = Math.round(canvasW * (gridH / gridW));
               const cellW = canvasW / gridW;
@@ -1717,14 +2771,24 @@
               canvas.height = canvasH;
               const ctx = canvas.getContext('2d');
               const colors = {
-                0: '#3b82f6', // water
-                1: '#22c55e', // grass
-                2: '#a16207', // dirt/path
-                3: '#eab308', // sand/special
+                0: '#2563eb', 1: '#16a34a', 2: '#92400e', 3: '#eab308',
+                4: '#4ade80', 5: '#713f12', 6: '#78716c', 7: '#6b5c3e',
+                8: '#60a5fa', 9: '#a8a29e', 10: '#57534e', 11: '#15803d',
+                12: '#d6b88a', 13: '#166534', 14: '#1e3a5f', 15: '#c2b280',
+                16: '#4a5568', 17: '#8b5e3c', 18: '#2d6a4f', 19: '#9f7e55',
+                20: '#b8c4a8', 21: '#5c4033', 22: '#7c9a3e', 23: '#3a7ca5',
+                24: '#6d6027', 25: '#bfa76a', 26: '#4a7c59', 27: '#c9b89e',
+                28: '#8e735b', 29: '#2e4057', 30: '#536b4e', 31: '#d4a76a',
+                32: '#8b7355', 33: '#5e7346', 34: '#3d5a80', 35: '#a0522d',
+                36: '#6b8e6b', 37: '#9e9e78', 38: '#708090', 39: '#556b2f',
+                41: '#8fbc8f', 43: '#bc8f8f', 44: '#696969', 45: '#4682b4',
+                46: '#2f4f4f', 47: '#daa520', 48: '#5f9ea0', 49: '#7b6b4a',
+                50: '#9acd32',
               };
               for (let y = 0; y < gridH; y++) {
                 for (let x = 0; x < gridW; x++) {
-                  const val = cells[y * gridW + x] ?? 0;
+                  const rawIdx = isInterleaved ? (y * 2) * gridW + x : y * gridW + x;
+                  const val = rawCells[rawIdx] ?? 0;
                   ctx.fillStyle = colors[val] || '#555';
                   ctx.fillRect(x * cellW, y * cellH, cellW + 0.5, cellH + 0.5);
                 }
@@ -2125,12 +3189,35 @@
       }
     }
 
+    // === Direct plot view via ?plot=NUMBER ===
+    function checkDirectPlotView() {
+      const params = new URLSearchParams(window.location.search);
+      const plotNum = params.get('plot');
+      if (!plotNum) return;
+      // Fetch plot data and enter 3D view directly
+      fetch(`/api/v1/plots/${encodeURIComponent(plotNum)}`)
+        .then(r => r.json())
+        .then(data => {
+          if (!data.success || !data.map || !data.map.cells) {
+            console.warn('Direct plot view: no map data for plot', plotNum);
+            return;
+          }
+          // Hide loading screen if still showing
+          const loading = document.getElementById('loading');
+          if (loading) loading.style.display = 'none';
+          enterPlotView(data, { name: `Plot #${plotNum}`, plotId: plotNum });
+        })
+        .catch(err => console.warn('Direct plot view failed:', err));
+    }
+
     // Initialize
     loadLands();
     loadChainStats();
     loadEconomy();
     loadLeaderboard();
     loadStorefront();
+    // Check for direct plot view after a brief delay for scene setup
+    setTimeout(checkDirectPlotView, 1000);
     // Refresh storefront every 2 minutes
     setInterval(loadStorefront, 2 * 60 * 1000);
     // Position storefront after a brief delay for layout

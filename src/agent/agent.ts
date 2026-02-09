@@ -14,6 +14,7 @@ interface TrackedConversation {
 
 interface ConversationStore {
   conversations: TrackedConversation[];
+  recentPosts?: { title: string; timestamp: string }[];
 }
 
 export interface AgentConfig {
@@ -96,6 +97,20 @@ export class AliceMoltbookAgent {
     // Keep only last 50 conversations to avoid unbounded growth
     store.conversations = store.conversations.slice(-50);
     fs.writeFileSync(this.storePath, JSON.stringify(store, null, 2));
+  }
+
+  private trackPost(title: string): void {
+    const store = this.loadConversations();
+    if (!store.recentPosts) store.recentPosts = [];
+    store.recentPosts.push({ title, timestamp: new Date().toISOString() });
+    // Keep only last 20
+    store.recentPosts = store.recentPosts.slice(-20);
+    this.saveConversations(store);
+  }
+
+  getRecentPostTitles(count = 10): string[] {
+    const store = this.loadConversations();
+    return (store.recentPosts || []).slice(-count).map(p => p.title);
   }
 
   private trackComment(postId: string, commentId: string): void {
@@ -438,44 +453,37 @@ export class AliceMoltbookAgent {
   }
 
   /**
-   * Decide what action to take
+   * Decide what actions to take this cycle (can return multiple)
    */
-  async decideAction(state: EnvironmentState): Promise<{
+  async decideActions(state: EnvironmentState): Promise<{
     action: 'post' | 'comment' | 'observe';
     content?: string;
     title?: string;
     target?: string;
-  }> {
+  }[]> {
     const now = Date.now();
+    const actions: { action: 'post' | 'comment' | 'observe'; content?: string; title?: string; target?: string }[] = [];
 
     // Check rate limits
     const canPost = !this.lastPostTime || (now - this.lastPostTime.getTime()) > 30 * 60 * 1000;
     const canComment = !this.lastCommentTime || (now - this.lastCommentTime.getTime()) > 20 * 1000;
 
-    // Priority 1: Find relevant posts to engage with
+    // Action 1: Create an original post (LLM-generated)
+    if (canPost) {
+      const { title, content } = await this.llm.generatePost(state, state.moltbookPosts, this.getRecentPostTitles());
+      actions.push({ action: 'post', title, content });
+    }
+
+    // Action 2: Comment on a relevant post
     if (canComment && state.moltbookPosts.length > 0) {
       const relevantPost = this.findRelevantPost(state.moltbookPosts);
       if (relevantPost) {
         const content = await this.llm.generateComment(relevantPost, state);
-        return {
-          action: 'comment',
-          target: relevantPost.id,
-          content,
-        };
+        actions.push({ action: 'comment', target: relevantPost.id, content });
       }
     }
 
-    // Priority 2: Post blockchain insights or general observation
-    if (canPost) {
-      const { title, content } = await this.llm.generatePost(state, state.moltbookPosts);
-      return {
-        action: 'post',
-        title,
-        content,
-      };
-    }
-
-    return { action: 'observe' };
+    return actions.length > 0 ? actions : [{ action: 'observe' }];
   }
 
   /**
@@ -493,13 +501,13 @@ export class AliceMoltbookAgent {
       // 2. Check for replies to our existing comments (highest priority)
       const repliesSent = await this.checkForReplies(state);
       if (repliesSent > 0) {
-        console.log(`[Agent] Sent ${repliesSent} reply(ies), skipping new actions this cycle`);
-      } else {
-        // 3. Decide new action
-        const decision = await this.decideAction(state);
-        console.log('[Agent] Decision:', decision.action);
+        console.log(`[Agent] Sent ${repliesSent} reply(ies)`);
+      }
 
-        // 4. Execute action
+      // 3. Decide and execute new actions (post + comment can both happen)
+      const decisions = await this.decideActions(state);
+      for (const decision of decisions) {
+        console.log('[Agent] Action:', decision.action);
         await this.executeAction(decision);
       }
 
@@ -529,6 +537,7 @@ export class AliceMoltbookAgent {
             console.log('[Agent] Creating post:', decision.title.slice(0, 50));
             await this.moltbook.createPost(decision.title, decision.content, this.pickSubmolt());
             this.lastPostTime = new Date();
+            this.trackPost(decision.title);
             console.log('[Agent] Post published!');
           }
           break;

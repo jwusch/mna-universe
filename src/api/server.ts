@@ -1180,6 +1180,7 @@ app.get('/api/v1/plots/:plotNumber', async (req, res) => {
       nodes: plotNodes.status === 'fulfilled' ? plotNodes.value : null,
       placeables: {
         placedCount: placedArr.length,
+        placed: placedArr,
         inventory: Array.isArray(placeablesInventory)
           ? placeablesInventory.map((p: any) => ({ name: p.name || p.prototype_name || 'unknown', amount: p.amount ?? 1 }))
           : [],
